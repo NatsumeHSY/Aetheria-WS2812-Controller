@@ -2,7 +2,7 @@ import socket
 import unittest
 
 from client.controller import ControllerError, LEDController
-from client.protocol import SYNC_RESPONSE, build_packet, build_sync_packet
+from client.protocol import SYNC_RESPONSE, build_packet, build_sync_packet, decode_packet
 from client.sync_state import SyncSnapshot, encode_sync_snapshot
 
 
@@ -39,6 +39,17 @@ def sync_response(snapshot, sequence):
 
 
 class ControllerSyncTests(unittest.TestCase):
+    def test_controller_sends_white_balance_parameter_without_touching_sequence_contract(self):
+        sock = FakeSyncSocket([b"LD\x01\x00\x2A"])
+        controller = LEDController(sock=sock, retries=1)
+        controller.connected = True
+        controller._sequence = 0x002A
+
+        sequence = controller.set_white_balance(255, 190, 110)
+
+        self.assertEqual(sequence, 0x002A)
+        self.assertEqual(decode_packet(sock.sent[0][0])[2], [255, 190, 110])
+
     def test_sync_decodes_board_snapshot_without_advancing_sequence(self):
         snapshot = SyncSnapshot(
             mode=2,

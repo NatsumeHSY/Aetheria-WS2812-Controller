@@ -14,6 +14,7 @@ let healthCheckInFlight = false;
 let maintenanceMode = false;
 let persistTimer = null;
 let persistInFlight = null;
+let whiteBalanceTimer = null;
 let activeModalResolve = null;
 let activeModalMode = "notice";
 let modalPreviousFocus = null;
@@ -232,6 +233,27 @@ function getPaletteColors() {
     return Array.from(document.querySelectorAll("#colorList .palette-color"), input => input.value);
 }
 
+const WHITE_BALANCE_CHANNELS = ["Red", "Green", "Blue"];
+
+function getWhiteBalanceValues() {
+    return WHITE_BALANCE_CHANNELS.map(channel => {
+        const input = document.getElementById(`whiteBalance${channel}`);
+        const value = Number(input?.value);
+        return Number.isFinite(value) ? Math.max(0, Math.min(255, Math.round(value))) : 255;
+    });
+}
+
+function applyWhiteBalanceControls(values) {
+    if (!Array.isArray(values) || values.length !== 3) return;
+    WHITE_BALANCE_CHANNELS.forEach((channel, index) => {
+        const value = Math.max(0, Math.min(255, Math.round(Number(values[index]))));
+        const input = document.getElementById(`whiteBalance${channel}`);
+        const output = document.getElementById(`whiteBalance${channel}Value`);
+        if (input) input.value = String(value);
+        if (output) output.textContent = String(value);
+    });
+}
+
 function addPaletteColor() {
     const list = document.getElementById("colorList");
     const row = document.createElement("div");
@@ -311,6 +333,7 @@ function currentSettings() {
         paintColor: document.getElementById("paintColorPicker")?.value || "#8dc9bc",
         brightness: Number(document.getElementById("brightness").value),
         speed: Number(document.getElementById("speed").value),
+        whiteBalance: getWhiteBalanceValues(),
         mode,
         matrix144x6: cloneMatrix(matrixData),
     };
@@ -344,6 +367,7 @@ function applyUiState(state) {
         speed.value = String(state.speed);
         document.getElementById("speedValue").textContent = speed.value;
     }
+    applyWhiteBalanceControls(state.whiteBalance);
     updateRhythmControl(state.mode);
 
     currentMode = state.mode === "自定义矩阵" || state.source === "matrix"
@@ -827,6 +851,7 @@ async function resetDeviceState() {
 function bindEvents() {
     const brightness = document.getElementById("brightness");
     const speed = document.getElementById("speed");
+    const whiteBalanceInputs = document.querySelectorAll("[data-white-balance]");
     const paintColorPicker = document.getElementById("paintColorPicker");
     const modeButtons = document.querySelectorAll(".mode-button, .mode-btn");
     document.getElementById("maintenanceButton")?.addEventListener("click", () => {
@@ -888,6 +913,24 @@ function bindEvents() {
         schedulePersist();
     }
 
+    function updateWhiteBalanceParameter() {
+        const values = getWhiteBalanceValues();
+        void bridgeCall("set_white_balance", ...values).then(result => {
+            if (result.ok) {
+                applyWhiteBalanceControls(result.whiteBalance || values);
+                schedulePersist();
+            }
+        });
+    }
+
+    function scheduleWhiteBalanceUpdate() {
+        if (whiteBalanceTimer) window.clearTimeout(whiteBalanceTimer);
+        whiteBalanceTimer = window.setTimeout(() => {
+            whiteBalanceTimer = null;
+            updateWhiteBalanceParameter();
+        }, 100);
+    }
+
     bindColorList(applyCurrentSettings);
     bindShapeEvents();
 
@@ -898,6 +941,15 @@ function bindEvents() {
     speed.addEventListener("input", () => {
         document.getElementById("speedValue").textContent = speed.value;
         updateTimingParameter();
+    });
+    whiteBalanceInputs.forEach(input => input.addEventListener("input", () => {
+        const output = document.getElementById(`${input.id}Value`);
+        if (output) output.textContent = input.value;
+        scheduleWhiteBalanceUpdate();
+    }));
+    document.getElementById("resetWhiteBalance")?.addEventListener("click", () => {
+        applyWhiteBalanceControls([255, 255, 255]);
+        updateWhiteBalanceParameter();
     });
     paintColorPicker.addEventListener("input", schedulePersist);
     modeButtons.forEach(button => button.addEventListener("click", () => {

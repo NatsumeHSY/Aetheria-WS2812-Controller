@@ -36,6 +36,10 @@ class ShapeBridgeController:
         self.calls.append(("show",))
         return 12
 
+    def set_white_balance(self, red, green, blue):
+        self.calls.append(("white_balance", red, green, blue))
+        return 13
+
 
 class SyncBridgeController(ShapeBridgeController):
     def __init__(self, snapshot=None, error=None):
@@ -68,6 +72,22 @@ class WebUiBridgeTests(unittest.TestCase):
 
         self.assertEqual(bridge.health(), {"ok": True, "connected": True})
         self.assertEqual(bridge.controller.calls, [("health",)])
+
+    def test_white_balance_is_exposed_through_bridge(self):
+        bridge = self.make_bridge(MatrixShapeStore(Path(tempfile.mkdtemp()) / "shapes.json"))
+
+        result = bridge.set_white_balance("255", 190, 110)
+
+        self.assertEqual(
+            result,
+            {
+                "ok": True,
+                "connected": True,
+                "sequence": 13,
+                "whiteBalance": [255, 190, 110],
+            },
+        )
+        self.assertEqual(bridge.controller.calls, [("white_balance", 255, 190, 110)])
 
     def test_shape_crud_is_exposed_through_bridge(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -111,7 +131,7 @@ class WebUiBridgeTests(unittest.TestCase):
             )
 
     def test_sync_maps_board_static_and_matrix_state_to_ui_state(self):
-        snapshot = SyncSnapshot(1, 25, 200, 0, ((17, 34, 51),), None)
+        snapshot = SyncSnapshot(1, 25, 200, 0, ((17, 34, 51),), None, (255, 190, 110))
         matrix = tuple(
             tuple((1, 2, 3) if row == 0 and column == 0 else (0, 0, 0) for column in range(144))
             for row in range(6)
@@ -126,6 +146,7 @@ class WebUiBridgeTests(unittest.TestCase):
             self.assertEqual(result["state"]["mode"], "静态常亮")
             self.assertEqual(result["state"]["brightness"], round(200 * 100 / 255))
             self.assertEqual(result["state"]["colors"], ["#112233"])
+            self.assertEqual(result["state"]["whiteBalance"], [255, 190, 110])
 
             bridge.controller.snapshot = SyncSnapshot(4, 80, 80, 0, (), matrix)
             matrix_result = bridge.sync()

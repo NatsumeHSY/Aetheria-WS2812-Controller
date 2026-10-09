@@ -44,6 +44,17 @@ def _normalize_matrix(value) -> list[list[str]]:
     return matrix
 
 
+def _normalize_white_balance(value) -> list[int]:
+    if value is None:
+        return [255, 255, 255]
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError("whiteBalance must contain three channel values")
+    return [
+        _require_int(channel, f"whiteBalance[{index}]", 0, 255)
+        for index, channel in enumerate(value)
+    ]
+
+
 def normalize_ui_state(state: dict) -> dict:
     if not isinstance(state, dict):
         raise ValueError("UI state must be an object")
@@ -72,6 +83,7 @@ def normalize_ui_state(state: dict) -> dict:
         "speed": _require_int(state.get("speed"), "speed", 10, 200),
         "colors": [_normalize_color(color, "colors[]") for color in colors],
         "paintColor": _normalize_color(state.get("paintColor"), "paintColor"),
+        "whiteBalance": _normalize_white_balance(state.get("whiteBalance")),
         "matrix144x6": _normalize_matrix(state.get("matrix144x6")),
     }
 

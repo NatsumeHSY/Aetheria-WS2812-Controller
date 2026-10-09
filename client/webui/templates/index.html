@@ -337,6 +337,12 @@
       border-top: 1px solid var(--line);
     }
 
+    .white-balance-grid { display: grid; gap: 8px; }
+    .white-balance-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) 30px; gap: 8px; align-items: center; color: var(--ink-muted); font-size: 11px; }
+    .white-balance-row output { color: var(--teal-deep); text-align: right; font-variant-numeric: tabular-nums; }
+    .white-balance-row input[type="range"] { margin: 0; }
+    .white-balance-reset { width: 100%; margin-top: 10px; padding: 7px 9px; color: var(--ink-muted); font-size: 11px; }
+
     .control-label {
       display: flex;
       justify-content: space-between;
@@ -560,6 +566,15 @@
           <div class="control-label"><span>快捷颜色</span><span class="color-code">渐变 / 单色</span></div>
           <div class="palette-list" id="colorList"></div>
           <button class="palette-add" id="addColor" type="button">＋ 添加颜色</button>
+        </div>
+        <div class="control-section">
+          <div class="control-label"><span>白平衡</span><span class="value-display">输出校正</span></div>
+          <div class="white-balance-grid" aria-label="白平衡通道校正">
+            <label class="white-balance-row"><span>红 R</span><input id="whiteBalanceRed" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceRedValue">255</output></label>
+            <label class="white-balance-row"><span>绿 G</span><input id="whiteBalanceGreen" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceGreenValue">255</output></label>
+            <label class="white-balance-row"><span>蓝 B</span><input id="whiteBalanceBlue" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceBlueValue">255</output></label>
+          </div>
+          <button class="tool-button white-balance-reset" id="resetWhiteBalance" type="button">恢复默认白平衡</button>
         </div>
         <div class="control-section">
           <div class="control-label"><span>亮度</span><span class="value-display" id="brightValue">72%</span></div>

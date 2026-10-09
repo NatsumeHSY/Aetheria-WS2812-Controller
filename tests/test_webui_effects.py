@@ -166,6 +166,21 @@ class WebUiEffectTests(unittest.TestCase):
         self.assertIn("function updateTimingParameter", runtime_index)
         self.assertNotIn('brightness.addEventListener("input", () => {\n        document.getElementById("brightValue").textContent = `${brightness.value}%`;\n        applyCurrentSettings();', runtime_index)
 
+    def test_white_balance_controls_are_kept_in_preview_and_runtime_sources(self):
+        template = (ROOT / "client" / "webui" / "templates" / "index.html").read_text(encoding="utf-8")
+        runtime_constants = (ROOT / "client" / "webui" / "scripts" / "runtime_const.js").read_text(encoding="utf-8")
+        runtime_index = (ROOT / "client" / "webui" / "scripts" / "index.js").read_text(encoding="utf-8")
+
+        for source in (template, runtime_constants):
+            self.assertIn('id="whiteBalanceRed"', source)
+            self.assertIn('id="whiteBalanceGreen"', source)
+            self.assertIn('id="whiteBalanceBlue"', source)
+            self.assertIn('id="resetWhiteBalance"', source)
+            self.assertIn("white-balance-grid", source)
+        self.assertIn('bridgeCall("set_white_balance"', runtime_index)
+        self.assertIn("whiteBalance: getWhiteBalanceValues()", runtime_index)
+        self.assertIn("applyWhiteBalanceControls(state.whiteBalance)", runtime_index)
+
     def test_blank_page_server_serves_loopback_shell_and_stops(self):
         server = BlankPageServer()
         url = server.start()

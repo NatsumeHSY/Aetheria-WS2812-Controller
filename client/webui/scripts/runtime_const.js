@@ -195,6 +195,11 @@ window.htmlHeadContent = `
 
   .control-section + .control-section { margin-top: 22px; padding-top: 20px; border-top: 1px solid var(--line); }
   .control-label { justify-content: space-between; gap: 12px; margin-bottom: 10px; font-size: 12px; font-weight: 700; }
+  .white-balance-grid { display: grid; gap: 8px; }
+  .white-balance-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) 30px; gap: 8px; align-items: center; color: var(--ink-muted); font-size: 11px; }
+  .white-balance-row output { color: var(--teal-deep); text-align: right; font-variant-numeric: tabular-nums; }
+  .white-balance-row input[type="range"] { margin: 0; }
+  .white-balance-reset { width: 100%; margin-top: 10px; padding: 7px 9px; color: var(--ink-muted); font-size: 11px; }
   .mode-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .mode-button { min-height: 40px; padding: 8px 10px; color: var(--ink-muted); font-size: 12px; text-align: left; }
   .palette-list { display: grid; height: 184px; gap: 8px; align-content: start; overflow-y: scroll; padding: 8px 6px 8px 8px; border: 1px solid var(--line); border-radius: 12px; scrollbar-color: var(--teal) transparent; }
@@ -270,6 +275,15 @@ window.htmlBodyContent = `
         <div class="control-label"><span>快捷颜色</span><span class="value-display">渐变 / 单色</span></div>
         <div class="palette-list" id="colorList"><div class="palette-row"><input class="palette-color" type="color" value="#d88773" aria-label="默认快捷颜色" /></div></div>
         <button class="palette-add" id="addColor" type="button">＋ 添加颜色</button>
+      </div>
+      <div class="control-section">
+        <div class="control-label"><span>白平衡</span><span class="value-display">输出校正</span></div>
+        <div class="white-balance-grid" aria-label="白平衡通道校正">
+          <label class="white-balance-row"><span>红 R</span><input id="whiteBalanceRed" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceRedValue">255</output></label>
+          <label class="white-balance-row"><span>绿 G</span><input id="whiteBalanceGreen" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceGreenValue">255</output></label>
+          <label class="white-balance-row"><span>蓝 B</span><input id="whiteBalanceBlue" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceBlueValue">255</output></label>
+        </div>
+        <button class="tool-button white-balance-reset" id="resetWhiteBalance" type="button">恢复默认白平衡</button>
       </div>
       <div class="control-section"><div class="control-label"><span>亮度</span><span class="value-display" id="brightValue">72%</span></div><input id="brightness" type="range" min="0" max="100" value="72" /></div>
       <div class="control-section"><div class="control-label"><span>节奏</span><span class="value-display" id="speedValue">50</span></div><input id="speed" type="range" min="10" max="200" value="50" /></div>

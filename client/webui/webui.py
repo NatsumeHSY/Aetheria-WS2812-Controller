@@ -197,6 +197,21 @@ class JavaScriptBridge:
         except (ControllerError, OSError, ValueError) as error:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
 
+    def set_white_balance(self, red: int | str, green: int | str, blue: int | str) -> dict:
+        try:
+            if not self.controller.connected and not self.controller.connect():
+                return {"ok": False, "connected": False, "error": "无法连接 ESP32"}
+            values = [max(0, min(255, int(value))) for value in (red, green, blue)]
+            sequence = self.controller.set_white_balance(*values)
+            return {
+                "ok": True,
+                "connected": True,
+                "sequence": sequence,
+                "whiteBalance": values,
+            }
+        except (ControllerError, OSError, ValueError) as error:
+            return {"ok": False, "connected": self.controller.connected, "error": str(error)}
+
     def restart(self) -> dict:
         try:
             if not self.controller.connected and not self.controller.connect():
@@ -231,6 +246,7 @@ class JavaScriptBridge:
             "brightness": brightness,
             "speed": speed,
             "colors": [_rgb_hex(color) for color in snapshot.colors],
+            "whiteBalance": list(snapshot.white_balance),
             "paintColor": "#8dc9bc",
             "matrix144x6": _blank_ui_matrix(),
         }

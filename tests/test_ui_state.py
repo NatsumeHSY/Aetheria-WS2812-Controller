@@ -15,11 +15,30 @@ def valid_state():
         "speed": 50,
         "colors": ["#112233", "#AABBCC"],
         "paintColor": "#8dc9bc",
+        "whiteBalance": [255, 190, 110],
         "matrix144x6": [["#000000" for _ in range(144)] for _ in range(6)],
     }
 
 
 class UiStateTests(unittest.TestCase):
+    def test_white_balance_defaults_for_legacy_ui_state_and_preserves_explicit_values(self):
+        state = valid_state()
+        state.pop("whiteBalance")
+
+        normalized = normalize_ui_state(state)
+
+        self.assertEqual(normalized["whiteBalance"], [255, 255, 255])
+        state["whiteBalance"] = [200, 150, 100]
+        self.assertEqual(normalize_ui_state(state)["whiteBalance"], [200, 150, 100])
+
+    def test_white_balance_channels_are_validated(self):
+        for value in ([256, 0, 0], [-1, 0, 0], [1, 2], [1, 2, "3"]):
+            state = valid_state()
+            state["whiteBalance"] = value
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    normalize_ui_state(state)
+
     def test_valid_state_round_trip_and_parent_directory_creation(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "nested" / "ui_state.json"

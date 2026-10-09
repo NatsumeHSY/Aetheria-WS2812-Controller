@@ -12,6 +12,7 @@ try:
         MAINTENANCE_COMMAND,
         PARAM_BRIGHTNESS_COMMAND,
         PARAM_TIMING_COMMAND,
+        PARAM_WHITE_BALANCE_COMMAND,
         RESET_STATE_COMMAND,
         RESTART_COMMAND,
         RESEND,
@@ -32,6 +33,7 @@ except ImportError:
         MAINTENANCE_COMMAND,
         PARAM_BRIGHTNESS_COMMAND,
         PARAM_TIMING_COMMAND,
+        PARAM_WHITE_BALANCE_COMMAND,
         RESET_STATE_COMMAND,
         RESTART_COMMAND,
         RESEND,
@@ -370,6 +372,16 @@ class LEDController:
         return self._send_packet(
             PARAM_TIMING_COMMAND[0],
             timing_ms.to_bytes(2, "big"),
+        )
+
+    def set_white_balance(self, red: int, green: int, blue: int) -> int:
+        return self._send_packet(
+            PARAM_WHITE_BALANCE_COMMAND[0],
+            bytes([
+                _byte(red, "white balance red"),
+                _byte(green, "white balance green"),
+                _byte(blue, "white balance blue"),
+            ]),
         )
 
     def restart(self) -> int:
