@@ -1,42 +1,36 @@
 import ast
+import importlib
+import sys
 import unittest
 from pathlib import Path
 
 
 BOARD_MAIN = Path(__file__).parents[1] / "board" / "main.py"
+BOARD_DIR = BOARD_MAIN.parent
+
+
+def load_extracted_board_module(name):
+    board_path = str(BOARD_DIR)
+    if board_path not in sys.path:
+        sys.path.insert(0, board_path)
+    return importlib.import_module(name)
 
 
 def load_persistence_helpers():
-    tree = ast.parse(BOARD_MAIN.read_text(encoding="utf-8"))
-    wanted = {
-        "_blank_matrix",
-        "_copy_matrix",
-        "_normalize_rgb",
-        "persistence_checksum",
-        "encode_persisted_state",
-        "decode_persisted_state",
-        "atomic_write_persisted_state",
+    module = load_extracted_board_module("persistence")
+    return {
+        name: getattr(module, name)
+        for name in (
+            "persistence_checksum",
+            "encode_persisted_state",
+            "decode_persisted_state",
+            "atomic_write_persisted_state",
+        )
     }
-    definitions = [
-        node for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name in wanted
-    ]
-    namespace = {
-        "PERSISTENCE_MAGIC": b"LS",
-        "PERSISTENCE_VERSION": 1,
-        "PERSISTENCE_MAX_COLORS": 32,
-        "LED_LINE": 6,
-        "LED_DOT_PER_LINE": 144,
-        "PERSISTENCE_PATH": "state.bin",
-        "PERSISTENCE_TEMP_PATH": "state.tmp",
-        "os": object(),
-    }
-    exec(compile(ast.Module(body=definitions, type_ignores=[]), str(BOARD_MAIN), "exec"), namespace)
-    return namespace
 
 
 def load_restore_helper(state, driver, effector):
+    runtime_state = importlib.reload(load_extracted_board_module("state"))
     tree = ast.parse(BOARD_MAIN.read_text(encoding="utf-8"))
     wanted = {
         "_blank_matrix",
@@ -84,11 +78,34 @@ def load_restore_helper(state, driver, effector):
         "EFFECTOR": effector,
         "load_persisted_state": lambda: state,
     }
+    for name in (
+        "_blank_matrix",
+        "_copy_matrix",
+        "_normalize_rgb",
+        "_snapshot_write",
+        "copy_light_snapshot",
+        "reset_light_snapshot",
+        "update_fill_snapshot",
+        "update_breathe_snapshot",
+        "update_matrix_snapshot",
+        "update_rainbow_snapshot",
+        "get_global_timing",
+        "get_global_brightness",
+        "initialize_runtime_params",
+    ):
+        namespace[name] = getattr(runtime_state, name)
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(BOARD_MAIN), "exec"), namespace)
     return namespace
 
 
 class BoardPersistenceTests(unittest.TestCase):
+    def test_extracted_state_supports_atomic_white_balance_updates(self):
+        state = load_extracted_board_module("state")
+        state.set_global_white_balance(255, 190, 110)
+
+        self.assertEqual(state.get_global_white_balance(), (255, 190, 110))
+        state.set_global_white_balance(255, 255, 255)
+
     def test_static_and_rainbow_state_round_trip(self):
         helpers = load_persistence_helpers()
         snapshot = {
@@ -111,6 +128,27 @@ class BoardPersistenceTests(unittest.TestCase):
 
         self.assertEqual(decoded["snapshot"], snapshot)
         self.assertEqual(decoded["effect_params"], params)
+
+    def test_legacy_persistence_defaults_white_balance(self):
+        helpers = load_persistence_helpers()
+        snapshot = {
+            "mode": 1,
+            "brightness_min": 18,
+            "brightness_max": 180,
+            "timing": 0x1234,
+            "colors": [[1, 2, 3]],
+            "matrix": None,
+        }
+        encoded = helpers["encode_persisted_state"](
+            snapshot,
+            white_balance=(255, 190, 110),
+        )
+        legacy_without_checksum = encoded[:2] + b"\x01" + encoded[3:8] + encoded[11:-2]
+        legacy = legacy_without_checksum + helpers["persistence_checksum"](legacy_without_checksum).to_bytes(2, "big")
+
+        decoded = helpers["decode_persisted_state"](legacy)
+
+        self.assertEqual(decoded["white_balance"], (255, 255, 255))
 
     def test_matrix_state_round_trip_preserves_all_black_pixels(self):
         helpers = load_persistence_helpers()

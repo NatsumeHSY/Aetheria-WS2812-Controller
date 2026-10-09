@@ -27,7 +27,65 @@ except ImportError:
         validate_packet,
     )
 
-# initialize global variables
+# import runtime state and persistence services
+try:
+    from .state import (
+        LIGHT_EFFECT_PARAMS,
+        SNAPSHOT_LOCK,
+        _blank_matrix,
+        _copy_matrix,
+        _normalize_rgb,
+        copy_light_snapshot,
+        get_global_brightness,
+        get_global_timing,
+        get_global_white_balance,
+        initialize_runtime_params,
+        mark_unknown_snapshot,
+        reset_light_snapshot,
+        set_global_brightness,
+        set_global_timing,
+        set_global_white_balance,
+        update_breathe_snapshot,
+        update_fill_snapshot,
+        update_matrix_pixels,
+        update_matrix_snapshot,
+        update_rainbow_snapshot,
+    )
+    from .persistence import (
+        atomic_write_persisted_state,
+        decode_persisted_state,
+        encode_persisted_state,
+    )
+except ImportError:
+    from state import (
+        LIGHT_EFFECT_PARAMS,
+        SNAPSHOT_LOCK,
+        _blank_matrix,
+        _copy_matrix,
+        _normalize_rgb,
+        copy_light_snapshot,
+        get_global_brightness,
+        get_global_timing,
+        get_global_white_balance,
+        initialize_runtime_params,
+        mark_unknown_snapshot,
+        reset_light_snapshot,
+        set_global_brightness,
+        set_global_timing,
+        set_global_white_balance,
+        update_breathe_snapshot,
+        update_fill_snapshot,
+        update_matrix_pixels,
+        update_matrix_snapshot,
+        update_rainbow_snapshot,
+    )
+    from persistence import (
+        atomic_write_persisted_state,
+        decode_persisted_state,
+        encode_persisted_state,
+    )
+
+# initialize application globals
 DRIVER: LedDriver = None
 EFFECTOR: Effector = None
 SOCKET: socket.socket = None
@@ -35,289 +93,8 @@ CLIENT_ADDR: tuple[str, int] = None
 SOCKET_BUFFER: list[tuple[bytes, int, list]] = []
 EXPECTED_SEQ: int = None
 MAINTENANCE_MODE = False
-SNAPSHOT_LOCK = _thread.allocate_lock()
-LIGHT_SNAPSHOT = {
-    "mode": 0,
-    "brightness_min": 0,
-    "brightness_max": 0,
-    "timing": 0,
-    "colors": [],
-    "matrix": None,
-}
-LIGHT_EFFECT_PARAMS = {}
-GLOBAL_BRIGHTNESS = LED_MAX_BRIGHTNESS
-GLOBAL_TIMING_MS = 0
 
-# define functions
-def _blank_matrix() -> list[list[list[int]]]:
-    return [
-        [[0, 0, 0] for _ in range(LED_DOT_PER_LINE)]
-        for _ in range(LED_LINE)
-    ]
-
-def _copy_matrix(matrix: list[list[list[int]]] | None) -> list[list[list[int]]] | None:
-    if matrix is None:
-        return None
-    return [[list(cell) for cell in row] for row in matrix]
-
-def _normalize_rgb(color: tuple[int, int, int] | list[int]) -> list[int]:
-    if len(color) != 3:
-        raise ValueError("RGB color must contain three channels")
-    values = [int(channel) for channel in color]
-    if any(channel < 0 or channel > 255 for channel in values):
-        raise ValueError("RGB channel must fit in one byte")
-    return values
-
-def persistence_checksum(data: bytes) -> int:
-    crc = 0xffff
-    for value in data:
-        crc ^= (value & 0xff) << 8
-        for _ in range(8):
-            if crc & 0x8000:
-                crc = ((crc << 1) ^ 0x1021) & 0xffff
-            else:
-                crc = (crc << 1) & 0xffff
-    return crc
-
-def encode_persisted_state(snapshot: dict, effect_params: dict | None = None) -> bytes:
-    effect_params = effect_params or {}
-    mode = int(snapshot.get("mode", 0))
-    if mode < 0 or mode > 0xff:
-        raise ValueError("persisted mode must fit in one byte")
-
-    brightness_min = max(0, min(255, int(snapshot.get("brightness_min", 0))))
-    brightness_max = max(0, min(255, int(snapshot.get("brightness_max", 0))))
-    timing = max(0, min(0xffff, int(snapshot.get("timing", 0))))
-    colors = snapshot.get("colors") or []
-    if len(colors) > PERSISTENCE_MAX_COLORS:
-        raise ValueError("too many persisted colors")
-
-    data = bytearray(PERSISTENCE_MAGIC)
-    data.append(PERSISTENCE_VERSION)
-    data.append(mode)
-    data.append(brightness_min)
-    data.append(brightness_max)
-    data.extend(timing.to_bytes(2, "big"))
-    data.append(len(colors))
-    for color in colors:
-        data.extend(_normalize_rgb(color))
-
-    matrix = snapshot.get("matrix")
-    if matrix is None:
-        data.append(0)
-    else:
-        if len(matrix) != LED_LINE or any(len(row) != LED_DOT_PER_LINE for row in matrix):
-            raise ValueError("persisted matrix dimensions must be 6x144")
-        data.append(1)
-        for row in matrix:
-            for color in row:
-                data.extend(_normalize_rgb(color))
-
-    params = bytearray()
-    if mode == 3:
-        start_x = max(0, min(LED_DOT_PER_LINE - 1, int(effect_params.get("start_x", 0))))
-        end_x = max(0, min(LED_DOT_PER_LINE - 1, int(effect_params.get("end_x", LED_DOT_PER_LINE - 1))))
-        duration = max(1, min(0xffff, int(effect_params.get("duration", 1))))
-        params.extend((start_x, end_x))
-        params.extend(duration.to_bytes(2, "big"))
-        params.append(255 if effect_params.get("pingpong", False) else 0)
-
-    data.append(len(params))
-    data.extend(params)
-    data.extend(persistence_checksum(data).to_bytes(2, "big"))
-    return bytes(data)
-
-def decode_persisted_state(data: bytes) -> dict | None:
-    if len(data) < 13 or data[:2] != PERSISTENCE_MAGIC:
-        return None
-    if data[2] != PERSISTENCE_VERSION:
-        return None
-    if persistence_checksum(data[:-2]) != int.from_bytes(data[-2:], "big"):
-        return None
-
-    index = 3
-    mode = data[index]
-    index += 1
-    brightness_min = data[index]
-    index += 1
-    brightness_max = data[index]
-    index += 1
-    timing = int.from_bytes(data[index:index + 2], "big")
-    index += 2
-    color_count = data[index]
-    index += 1
-    if color_count > PERSISTENCE_MAX_COLORS:
-        return None
-
-    colors = []
-    color_end = index + color_count * 3
-    if color_end > len(data) - 2:
-        return None
-    for _ in range(color_count):
-        colors.append(list(data[index:index + 3]))
-        index += 3
-
-    if index >= len(data) - 2:
-        return None
-    matrix_flag = data[index]
-    index += 1
-    if matrix_flag not in (0, 1):
-        return None
-
-    matrix = None
-    if matrix_flag:
-        matrix_size = LED_LINE * LED_DOT_PER_LINE * 3
-        if index + matrix_size > len(data) - 2:
-            return None
-        matrix = []
-        for _ in range(LED_LINE):
-            row = []
-            for _ in range(LED_DOT_PER_LINE):
-                row.append(list(data[index:index + 3]))
-                index += 3
-            matrix.append(row)
-
-    if index >= len(data) - 2:
-        return None
-    params_length = data[index]
-    index += 1
-    params_end = index + params_length
-    if params_end != len(data) - 2:
-        return None
-
-    effect_params = {}
-    if mode == 3:
-        if params_length != 5:
-            return None
-        effect_params = {
-            "start_x": data[index],
-            "end_x": data[index + 1],
-            "duration": int.from_bytes(data[index + 2:index + 4], "big"),
-            "pingpong": data[index + 4] == 255,
-        }
-    elif params_length:
-        return None
-
-    return {
-        "snapshot": {
-            "mode": mode,
-            "brightness_min": brightness_min,
-            "brightness_max": brightness_max,
-            "timing": timing,
-            "colors": colors,
-            "matrix": matrix,
-        },
-        "effect_params": effect_params,
-    }
-
-def atomic_write_persisted_state(
-    data: bytes,
-    path: str = PERSISTENCE_PATH,
-    temp_path: str = PERSISTENCE_TEMP_PATH,
-    opener=open,
-    filesystem=os,
-) -> None:
-    with opener(temp_path, "wb") as handle:
-        handle.write(data)
-        flush = getattr(handle, "flush", None)
-        if flush is not None:
-            flush()
-
-    replace = getattr(filesystem, "replace", None)
-    if replace is not None:
-        replace(temp_path, path)
-        return
-
-    try:
-        filesystem.remove(path)
-    except OSError:
-        pass
-    filesystem.rename(temp_path, path)
-
-def _snapshot_write(
-    mode: int,
-    brightness_min: int,
-    brightness_max: int,
-    timing: int,
-    colors: list[list[int]] | list[tuple[int, int, int]],
-    matrix: list[list[list[int]]] | None,
-) -> None:
-    SNAPSHOT_LOCK.acquire()
-    try:
-        LIGHT_SNAPSHOT["mode"] = mode
-        LIGHT_SNAPSHOT["brightness_min"] = max(0, min(255, int(brightness_min)))
-        LIGHT_SNAPSHOT["brightness_max"] = max(0, min(255, int(brightness_max)))
-        LIGHT_SNAPSHOT["timing"] = max(0, min(0xFFFF, int(timing)))
-        LIGHT_SNAPSHOT["colors"] = [_normalize_rgb(color) for color in colors]
-        LIGHT_SNAPSHOT["matrix"] = _copy_matrix(matrix)
-        LIGHT_EFFECT_PARAMS.clear()
-    finally:
-        SNAPSHOT_LOCK.release()
-
-def copy_light_snapshot() -> dict:
-    SNAPSHOT_LOCK.acquire()
-    try:
-        return {
-            "mode": LIGHT_SNAPSHOT["mode"],
-            "brightness_min": LIGHT_SNAPSHOT["brightness_min"],
-            "brightness_max": LIGHT_SNAPSHOT["brightness_max"],
-            "timing": LIGHT_SNAPSHOT["timing"],
-            "colors": [list(color) for color in LIGHT_SNAPSHOT["colors"]],
-            "matrix": _copy_matrix(LIGHT_SNAPSHOT["matrix"]),
-        }
-    finally:
-        SNAPSHOT_LOCK.release()
-
-def get_global_brightness() -> int:
-    SNAPSHOT_LOCK.acquire()
-    try:
-        return GLOBAL_BRIGHTNESS
-    finally:
-        SNAPSHOT_LOCK.release()
-
-def get_global_timing(default: int = 0) -> int:
-    SNAPSHOT_LOCK.acquire()
-    try:
-        timing = GLOBAL_TIMING_MS
-    finally:
-        SNAPSHOT_LOCK.release()
-    return timing if timing > 0 else max(0, int(default))
-
-def set_global_brightness(value: int) -> int:
-    global GLOBAL_BRIGHTNESS
-
-    value = max(0, min(LED_MAX_BRIGHTNESS, int(value)))
-    SNAPSHOT_LOCK.acquire()
-    try:
-        GLOBAL_BRIGHTNESS = value
-        LIGHT_SNAPSHOT["brightness_max"] = value
-        if LIGHT_SNAPSHOT["mode"] != 2:
-            LIGHT_SNAPSHOT["brightness_min"] = value
-    finally:
-        SNAPSHOT_LOCK.release()
-    return value
-
-def set_global_timing(value: int) -> int:
-    global GLOBAL_TIMING_MS
-
-    value = max(1, min(0xFFFF, int(value)))
-    SNAPSHOT_LOCK.acquire()
-    try:
-        GLOBAL_TIMING_MS = value
-        LIGHT_SNAPSHOT["timing"] = value
-    finally:
-        SNAPSHOT_LOCK.release()
-    return value
-
-def initialize_runtime_params(snapshot: dict) -> None:
-    global GLOBAL_BRIGHTNESS, GLOBAL_TIMING_MS
-
-    SNAPSHOT_LOCK.acquire()
-    try:
-        GLOBAL_BRIGHTNESS = max(0, min(LED_MAX_BRIGHTNESS, int(snapshot.get("brightness_max", 0))))
-        GLOBAL_TIMING_MS = max(0, min(0xFFFF, int(snapshot.get("timing", 0))))
-    finally:
-        SNAPSHOT_LOCK.release()
+# state and persistence helpers are imported from sibling modules.
 
 def redraw_static_snapshot() -> None:
     snapshot = copy_light_snapshot()
@@ -331,9 +108,6 @@ def redraw_static_snapshot() -> None:
                 DRIVER.set_pixel(xy2pos(x, y), tuple(color), brightness, False)
         DRIVER.show()
 
-def reset_light_snapshot() -> None:
-    _snapshot_write(0, 0, 0, 0, [], None)
-
 def copy_persisted_state() -> dict:
     snapshot = copy_light_snapshot()
     SNAPSHOT_LOCK.acquire()
@@ -344,13 +118,18 @@ def copy_persisted_state() -> dict:
     return {
         "snapshot": snapshot,
         "effect_params": effect_params,
+        "white_balance": get_global_white_balance(),
     }
 
 def save_persisted_state() -> bool:
     try:
         state = copy_persisted_state()
         atomic_write_persisted_state(
-            encode_persisted_state(state["snapshot"], state["effect_params"])
+            encode_persisted_state(
+                state["snapshot"],
+                state["effect_params"],
+                state["white_balance"],
+            )
         )
         return True
     except Exception as error:
@@ -370,7 +149,7 @@ def restore_persisted_state() -> bool:
         return False
 
     snapshot = state["snapshot"]
-    initialize_runtime_params(snapshot)
+    initialize_runtime_params(snapshot, state.get("white_balance", (255, 255, 255)))
     mode = snapshot["mode"]
     if mode == 0:
         EFFECTOR.stop()
@@ -443,85 +222,6 @@ def restore_persisted_state() -> bool:
         return True
 
     return False
-
-def update_fill_snapshot(color: tuple[int, int, int], brightness: int) -> None:
-    _snapshot_write(1, brightness, brightness, get_global_timing(), [color], None)
-
-def update_breathe_snapshot(
-    colors: list[tuple[int, int, int]],
-    dark_brightness: int,
-    bright_brightness: int,
-) -> None:
-    _snapshot_write(2, dark_brightness, bright_brightness, get_global_timing(), colors, None)
-
-def update_rainbow_snapshot(
-    brightness: int,
-    timing: int,
-    start_x: int = 0,
-    end_x: int = LED_DOT_PER_LINE - 1,
-    duration: int = 1,
-    pingpong: bool = False,
-) -> None:
-    _snapshot_write(3, brightness, brightness, timing, [], None)
-    SNAPSHOT_LOCK.acquire()
-    try:
-        LIGHT_EFFECT_PARAMS.update({
-            "start_x": max(0, min(LED_DOT_PER_LINE - 1, int(start_x))),
-            "end_x": max(0, min(LED_DOT_PER_LINE - 1, int(end_x))),
-            "duration": max(1, min(0xFFFF, int(duration))),
-            "pingpong": bool(pingpong),
-        })
-    finally:
-        SNAPSHOT_LOCK.release()
-
-def update_matrix_snapshot(matrix: list[list[list[int]]], brightness: int) -> None:
-    if len(matrix) != LED_LINE or any(len(row) != LED_DOT_PER_LINE for row in matrix):
-        raise ValueError("matrix dimensions must be 6x144")
-    normalized = [[_normalize_rgb(cell) for cell in row] for row in matrix]
-    _snapshot_write(4, brightness, brightness, get_global_timing(), [], normalized)
-
-def update_matrix_pixels(pixels: list[list[int]], coordinate_mode: bool) -> None:
-    SNAPSHOT_LOCK.acquire()
-    try:
-        matrix = _copy_matrix(LIGHT_SNAPSHOT["matrix"]) or _blank_matrix()
-        brightnesses = []
-        for pixel in pixels:
-            first, second, brightness, red, green, blue = pixel
-            if coordinate_mode:
-                x, y = first, second
-            else:
-                if first < 0 or first >= LED_COUNT:
-                    continue
-                y, physical_x = divmod(first, LED_DOT_PER_LINE)
-                x = physical_x if y % 2 == 0 else LED_DOT_PER_LINE - 1 - physical_x
-            if x < 0 or x >= LED_DOT_PER_LINE or y < 0 or y >= LED_LINE:
-                continue
-            matrix[y][x] = _normalize_rgb((red, green, blue))
-            brightnesses.append(max(0, min(255, int(brightness))))
-
-        if not brightnesses:
-            return
-        LIGHT_SNAPSHOT["mode"] = 4
-        LIGHT_SNAPSHOT["brightness_min"] = min(brightnesses)
-        LIGHT_SNAPSHOT["brightness_max"] = max(brightnesses)
-        LIGHT_SNAPSHOT["timing"] = GLOBAL_TIMING_MS
-        LIGHT_SNAPSHOT["colors"] = []
-        LIGHT_SNAPSHOT["matrix"] = matrix
-        LIGHT_EFFECT_PARAMS.clear()
-    finally:
-        SNAPSHOT_LOCK.release()
-
-def mark_unknown_snapshot() -> None:
-    snapshot = copy_light_snapshot()
-    _snapshot_write(
-        0xFF,
-        snapshot["brightness_min"],
-        snapshot["brightness_max"],
-        snapshot["timing"],
-        [],
-        snapshot["matrix"],
-    )
-
 def build_sync_response(expected_seq: int) -> bytes:
     snapshot = copy_light_snapshot()
     colors = snapshot["colors"]

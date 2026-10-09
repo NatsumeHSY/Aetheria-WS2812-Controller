@@ -18,6 +18,7 @@ def load_extracted_board_module(name):
 
 def load_protocol_helpers():
     protocol = load_extracted_board_module("protocol")
+    state = importlib.reload(load_extracted_board_module("state"))
     tree = ast.parse(BOARD_MAIN.read_text(encoding="utf-8"))
     wanted = {
         "_blank_matrix",
@@ -80,11 +81,35 @@ def load_protocol_helpers():
         "classify_sequence": protocol.classify_sequence,
         "restore_health_session": protocol.restore_health_session,
     })
+    for name in (
+        "_blank_matrix",
+        "_copy_matrix",
+        "_normalize_rgb",
+        "_snapshot_write",
+        "copy_light_snapshot",
+        "get_global_timing",
+        "update_breathe_snapshot",
+        "update_fill_snapshot",
+        "update_matrix_snapshot",
+        "update_rainbow_snapshot",
+    ):
+        namespace[name] = getattr(state, name)
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(BOARD_MAIN), "exec"), namespace)
     return namespace
 
 
 def load_runtime_parameter_helpers():
+    state = importlib.reload(load_extracted_board_module("state"))
+    state.LIGHT_SNAPSHOT = {
+        "mode": 1,
+        "brightness_min": 80,
+        "brightness_max": 80,
+        "timing": 0,
+        "colors": [[10, 20, 30]],
+        "matrix": None,
+    }
+    state.GLOBAL_BRIGHTNESS = 255
+    state.GLOBAL_TIMING_MS = 0
     tree = ast.parse(BOARD_MAIN.read_text(encoding="utf-8"))
     wanted = {
         "_copy_matrix",
@@ -145,6 +170,18 @@ def load_runtime_parameter_helpers():
         "LIGHT_EFFECT_PARAMS": {},
         "DRIVER": FakeDriver(),
     }
+    for name in (
+        "_copy_matrix",
+        "_normalize_rgb",
+        "_snapshot_write",
+        "copy_light_snapshot",
+        "get_global_brightness",
+        "get_global_timing",
+        "set_global_brightness",
+        "set_global_timing",
+        "update_fill_snapshot",
+    ):
+        namespace[name] = getattr(state, name)
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(BOARD_MAIN), "exec"), namespace)
     return namespace
 
