@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+client/.venv/
+board/state.bin
+board/state.tmp
+*.tmp
+.superpowers/sdd/
