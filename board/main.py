@@ -1,8 +1,6 @@
 # import required modules
 import socket
-from machine import Pin
 import machine
-from neopixel import NeoPixel
 import time
 import math
 import _thread
@@ -56,6 +54,7 @@ try:
         decode_persisted_state,
         encode_persisted_state,
     )
+    from .led_driver import LedDriver
 except ImportError:
     from state import (
         LIGHT_EFFECT_PARAMS,
@@ -84,6 +83,7 @@ except ImportError:
         decode_persisted_state,
         encode_persisted_state,
     )
+    from led_driver import LedDriver
 
 # initialize application globals
 DRIVER: LedDriver = None
@@ -408,63 +408,6 @@ def interpolate_color_state(start: tuple[int, int, int, int], target: tuple[int,
             value = start[index] - ((-delta * step) // steps)
         values.append(value)
     return tuple(values)
-
-class LedDriver:
-    def __init__(self) -> None:
-        self.np = NeoPixel(Pin(LED_PIN, Pin.OUT), LED_COUNT)
-        self.current_state = (0, 0, 0, 0)
-    
-    def begin(self) -> None:
-        self.np.fill(COLOR_BLACK)
-        self.np.write()
-        self.current_state = (0, 0, 0, 0)
-
-    def set_pixel(self, index: int, color: tuple[int, int, int], brightness: int = 255, auto_write: bool = False) -> None:
-        r_int = int(color[0])
-        g_int = int(color[1])
-        b_int = int(color[2])
-        brightness = int(brightness)
-
-        if brightness > LED_MAX_BRIGHTNESS:
-            brightness = LED_MAX_BRIGHTNESS
-        elif brightness < LED_MIN_BRIGHTNESS:
-            brightness = LED_MIN_BRIGHTNESS
-        
-        if index < 0 or index >= LED_COUNT:
-            return
-        
-        r = (r_int * brightness) // 255
-        g = (g_int * brightness) // 255
-        b = (b_int * brightness) // 255
-        self.np[index] = (r, g, b)
-        if auto_write:
-            self.np.write()
-
-    def show(self):
-        self.np.write()
-    
-    def fill(self, color: tuple[int, int, int], brightness: int = 255) -> None:
-        r_int = int(color[0])
-        g_int = int(color[1])
-        b_int = int(color[2])
-        brightness = int(brightness)
-
-        if brightness > LED_MAX_BRIGHTNESS:
-            brightness = LED_MAX_BRIGHTNESS
-        elif brightness < LED_MIN_BRIGHTNESS:
-            brightness = LED_MIN_BRIGHTNESS
-
-        r = (r_int * brightness) // 255
-        g = (g_int * brightness) // 255
-        b = (b_int * brightness) // 255
-        self.np.fill((r, g, b))
-        self.np.write()
-        self.current_state = (r_int, g_int, b_int, brightness)
-    
-    def clear(self) -> None:
-        self.np.fill(COLOR_BLACK)
-        self.np.write()
-        self.current_state = (0, 0, 0, 0)
 
 class Effector:
     def __init__(self, driver: LedDriver) -> None:
