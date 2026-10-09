@@ -1,12 +1,23 @@
 import ast
+import importlib
+import sys
 import unittest
 from pathlib import Path
 
 
 BOARD_MAIN = Path(__file__).parents[1] / "board" / "main.py"
+BOARD_DIR = BOARD_MAIN.parent
+
+
+def load_extracted_board_module(name):
+    board_path = str(BOARD_DIR)
+    if board_path not in sys.path:
+        sys.path.insert(0, board_path)
+    return importlib.import_module(name)
 
 
 def load_protocol_helpers():
+    protocol = load_extracted_board_module("protocol")
     tree = ast.parse(BOARD_MAIN.read_text(encoding="utf-8"))
     wanted = {
         "_blank_matrix",
@@ -61,6 +72,14 @@ def load_protocol_helpers():
         "LIGHT_EFFECT_PARAMS": {},
         "GLOBAL_TIMING_MS": 0,
     }
+    namespace.update({
+        "next_sequence": protocol.next_sequence,
+        "crc4_itu": protocol.crc4_itu,
+        "calculate_packet_crc": protocol.calculate_packet_crc,
+        "validate_packet": protocol.validate_packet,
+        "classify_sequence": protocol.classify_sequence,
+        "restore_health_session": protocol.restore_health_session,
+    })
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(BOARD_MAIN), "exec"), namespace)
     return namespace
 
@@ -131,6 +150,17 @@ def load_runtime_parameter_helpers():
 
 
 class BoardProtocolTests(unittest.TestCase):
+    def test_extracted_protocol_module_exports_a2_and_sequence_helpers(self):
+        config = load_extracted_board_module("config")
+        protocol = load_extracted_board_module("protocol")
+
+        self.assertEqual(config.PARAM_WHITE_BALANCE_COMMAND, b"\xA2")
+        self.assertEqual(protocol.next_sequence(0xFFFF), 0)
+        self.assertEqual(
+            protocol.calculate_packet_crc(0x12, [0x10, 0x20]),
+            protocol.crc4_itu(0x12 ^ 0x10 ^ 0x20),
+        )
+
     def test_validate_packet_requires_exact_header_and_payload_length(self):
         validate_packet = load_protocol_helpers()["validate_packet"]
 

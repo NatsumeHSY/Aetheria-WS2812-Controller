@@ -1,45 +1,3 @@
-# define constants
-SOCKET_PORT = 7807
-SOCKET_MAGIC = b"\x4c\x44" # LD
-PROTOCOL_HEADER_SIZE = 7
-PROTOCOL_TRAILER_SIZE = 1
-MAX_PACKET_SIZE = 6144
-PERSISTENCE_MAGIC = b"LS"
-PERSISTENCE_VERSION = 1
-PERSISTENCE_MAX_COLORS = 32
-PERSISTENCE_PATH = "state.bin"
-PERSISTENCE_TEMP_PATH = "state.tmp"
-RESPONSE_ACK = b"\x01"
-RESPONSE_RESEND = b"\x02"
-RESPONSE_HEALTH = b"\x03"
-RESPONSE_SYNC = b"\x04"
-HEALTH_COMMAND = b"\xF1"
-SYNC_COMMAND = b"\xF2"
-MAINTENANCE_COMMAND = b"\xF3"
-RESTART_COMMAND = b"\xF4"
-RESET_STATE_COMMAND = b"\xF5"
-PARAM_BRIGHTNESS_COMMAND = b"\xA0"
-PARAM_TIMING_COMMAND = b"\xA1"
-SYNC_VERSION = 1
-LED_PIN = 4
-LED_LINE = 6
-LED_DOT_PER_LINE = 144
-LED_COUNT = LED_LINE * LED_DOT_PER_LINE
-LED_MIN_BRIGHTNESS = 0
-LED_MAX_BRIGHTNESS = 255
-RAINBOW_FRAME_INTERVAL = 5
-RAINBOW_HUE_STEP = 1
-RAINBOW_HUE_DIVISOR = 2
-COLOR_BLACK = (0, 0, 0)
-COLOR_WHITE = (255, 255, 255)
-COLOR_RED = (255, 0, 0)
-COLOR_GREEN = (0, 255, 0)
-COLOR_BLUE = (0, 0, 255)
-COLOR_YELLOW = (255, 255, 0)
-COLOR_CYAN = (0, 255, 255)
-COLOR_MAGENTA = (255, 0, 255)
-COLOR_PINK = (255, 60, 90)
-
 # import required modules
 import socket
 from machine import Pin
@@ -49,6 +7,25 @@ import time
 import math
 import _thread
 import os
+
+try:
+    from .config import *
+    from .protocol import (
+        calculate_packet_crc,
+        classify_sequence,
+        next_sequence,
+        restore_health_session,
+        validate_packet,
+    )
+except ImportError:
+    from config import *
+    from protocol import (
+        calculate_packet_crc,
+        classify_sequence,
+        next_sequence,
+        restore_health_session,
+        validate_packet,
+    )
 
 # initialize global variables
 DRIVER: LedDriver = None
@@ -72,68 +49,6 @@ GLOBAL_BRIGHTNESS = LED_MAX_BRIGHTNESS
 GLOBAL_TIMING_MS = 0
 
 # define functions
-def next_sequence(seq: int) -> int:
-    return (seq + 1) & 0xffff
-
-def crc4_itu(value: int) -> int:
-    crc = 0
-    value &= 0xff
-
-    for bit in range(8):
-        mix = ((value >> (7 - bit)) & 1) ^ ((crc >> 3) & 1)
-        crc = (crc << 1) & 0x0f
-        if mix:
-            crc ^= 0x03
-
-    return crc
-
-def calculate_packet_crc(seq: int, payload: list) -> int:
-    xor_value = ((seq >> 8) & 0xff) ^ (seq & 0xff)
-    for value in payload:
-        xor_value ^= value & 0xff
-    return crc4_itu(xor_value)
-
-def validate_packet(data: bytes) -> tuple[bool, bytes | None, int | None, list | None]:
-    if len(data) < PROTOCOL_HEADER_SIZE + PROTOCOL_TRAILER_SIZE or len(data) > MAX_PACKET_SIZE:
-        return False, None, None, None
-    if data[:2] != SOCKET_MAGIC:
-        return False, None, None, None
-
-    command = data[2:3]
-    length = int.from_bytes(data[3:5], "big")
-    seq = int.from_bytes(data[5:7], "big")
-
-    if len(data) != PROTOCOL_HEADER_SIZE + length + PROTOCOL_TRAILER_SIZE:
-        return False, None, None, None
-
-    payload = list(data[PROTOCOL_HEADER_SIZE:-PROTOCOL_TRAILER_SIZE])
-    checksum = data[-1]
-    if checksum > 0x0f or checksum != calculate_packet_crc(seq, payload):
-        return False, None, None, None
-
-    return True, command, seq, payload
-
-def classify_sequence(expected: int | None, received: int) -> tuple[str, int]:
-    if expected is None:
-        return "accept", next_sequence(received)
-
-    distance = (received - expected) & 0xffff
-    if distance == 0:
-        return "accept", next_sequence(received)
-    if distance < 0x8000:
-        return "gap", expected
-    return "replay", expected
-
-def restore_health_session(
-    remembered_addr: tuple[str, int] | None,
-    received_addr: tuple[str, int],
-    expected_seq: int | None,
-) -> tuple[bool, tuple[str, int] | None, int]:
-    next_expected = 0 if expected_seq is None else expected_seq
-    if remembered_addr is None or remembered_addr[0] != received_addr[0]:
-        return False, remembered_addr, next_expected
-    return True, received_addr, next_expected
-
 def _blank_matrix() -> list[list[list[int]]]:
     return [
         [[0, 0, 0] for _ in range(LED_DOT_PER_LINE)]
