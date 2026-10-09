@@ -1,10 +1,20 @@
 import ast
+import importlib
+import sys
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
 
 
 BOARD_MAIN = Path(__file__).parents[1] / "board" / "main.py"
+BOARD_DIR = BOARD_MAIN.parent
+
+
+def load_extracted_effects_module():
+    board_path = str(BOARD_DIR)
+    if board_path not in sys.path:
+        sys.path.insert(0, board_path)
+    return importlib.import_module("effects")
 
 
 class StopFrame(Exception):
@@ -52,37 +62,34 @@ class FakeDriver:
 
 
 def load_effector():
-    tree = ast.parse(BOARD_MAIN.read_text(encoding="utf-8"))
-    wanted = {"xy2pos", "rainbow_color", "get_global_brightness", "get_global_timing", "Effector"}
-    definitions = [
-        node for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in wanted
-    ]
+    effects = importlib.reload(load_extracted_effects_module())
+    state = importlib.import_module("state")
+    state.GLOBAL_BRIGHTNESS = 255
+    state.GLOBAL_TIMING_MS = 0
+
     thread = FakeThread()
-    namespace = {
-        "LED_DOT_PER_LINE": 144,
-        "LED_LINE": 6,
-        "RAINBOW_FRAME_INTERVAL": 5,
-        "RAINBOW_HUE_STEP": 1,
-        "RAINBOW_HUE_DIVISOR": 2,
-        "GLOBAL_BRIGHTNESS": 255,
-        "GLOBAL_TIMING_MS": 0,
-        "SNAPSHOT_LOCK": FakeLock(),
-        "COLOR_BLACK": (0, 0, 0),
-        "COLOR_WHITE": (255, 255, 255),
-        "LedDriver": type("LedDriver", (), {}),
-        "time": FakeTime(),
-        "_thread": SimpleNamespace(
-            start_new_thread=thread.start_new_thread,
-            allocate_lock=lambda: FakeLock(),
-        ),
-    }
-    exec(compile(ast.Module(body=definitions, type_ignores=[]), str(BOARD_MAIN), "exec"), namespace)
+    effects._thread = SimpleNamespace(
+        start_new_thread=thread.start_new_thread,
+        allocate_lock=lambda: FakeLock(),
+    )
+    effects.time = FakeTime()
+    effects.math = __import__("math")
     driver = FakeDriver()
-    return namespace["Effector"](driver), driver, thread, namespace
+    namespace = {
+        "rainbow_color": effects.rainbow_color,
+        "xy2pos": effects.xy2pos,
+    }
+    return effects.Effector(driver), driver, thread, namespace
 
 
 class BoardEffectTests(unittest.TestCase):
+    def test_extracted_effects_module_exports_effector_and_utilities(self):
+        effects = load_extracted_effects_module()
+
+        self.assertTrue(hasattr(effects, "Effector"))
+        self.assertEqual(effects.xy2pos(0, 1), 287)
+        self.assertEqual(effects.rainbow_color(0), (0, 255, 0))
+
     def test_scan_line_without_rainbow_uses_supplied_color(self):
         effector, driver, threads, _ = load_effector()
 
