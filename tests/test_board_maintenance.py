@@ -2,9 +2,15 @@ import ast
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
+import sys
 
 
 BOARD_MAIN = Path(__file__).parents[1] / "board" / "main.py"
+BOARD_DIR = BOARD_MAIN.parent
+if str(BOARD_DIR) not in sys.path:
+    sys.path.insert(0, str(BOARD_DIR))
+
+from protocol import classify_sequence
 
 
 def load_maintenance_helpers():
@@ -97,6 +103,7 @@ def load_maintenance_helpers():
         "machine": FakeMachine(),
         "os": FakeFilesystem(),
         "PERSISTENCE_PATH": "state.bin",
+        "classify_sequence": classify_sequence,
     }
     for handler_name in (
         "led_clear",
@@ -200,7 +207,7 @@ class BoardMaintenanceTests(unittest.TestCase):
         self.assertIsNone(helpers["SOCKET"])
 
     def test_board_reserves_command_f3_for_upload_mode(self):
-        source = BOARD_MAIN.read_text(encoding="utf-8")
+        source = BOARD_MAIN.read_text(encoding="utf-8") + (BOARD_DIR / "config.py").read_text(encoding="utf-8")
 
         self.assertIn('MAINTENANCE_COMMAND = b"\\xF3"', source)
         self.assertIn("if cmd == MAINTENANCE_COMMAND:", source)
@@ -208,7 +215,7 @@ class BoardMaintenanceTests(unittest.TestCase):
         self.assertIn("while not MAINTENANCE_MODE:", source)
 
     def test_board_exposes_restart_and_reset_state_control_codes(self):
-        source = BOARD_MAIN.read_text(encoding="utf-8")
+        source = BOARD_MAIN.read_text(encoding="utf-8") + (BOARD_DIR / "config.py").read_text(encoding="utf-8")
 
         self.assertIn('RESTART_COMMAND = b"\\xF4"', source)
         self.assertIn('RESET_STATE_COMMAND = b"\\xF5"', source)

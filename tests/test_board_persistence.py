@@ -31,6 +31,7 @@ def load_persistence_helpers():
 
 def load_restore_helper(state, driver, effector):
     runtime_state = importlib.reload(load_extracted_board_module("state"))
+    effects = load_extracted_board_module("effects")
     tree = ast.parse(BOARD_MAIN.read_text(encoding="utf-8"))
     wanted = {
         "_blank_matrix",
@@ -94,6 +95,7 @@ def load_restore_helper(state, driver, effector):
         "initialize_runtime_params",
     ):
         namespace[name] = getattr(runtime_state, name)
+    namespace["xy2pos"] = effects.xy2pos
     exec(compile(ast.Module(body=definitions, type_ignores=[]), str(BOARD_MAIN), "exec"), namespace)
     return namespace
 

@@ -96,7 +96,10 @@ class FlowRecoveryTests(unittest.TestCase):
         self.assertIn('bridgeCall("set_timing", timingMs)', source)
 
     def test_board_rainbow_uses_fixed_smooth_timing(self):
-        board = (ROOT / "board" / "main.py").read_text(encoding="utf-8")
+        board = "\n".join(
+            (ROOT / "board" / name).read_text(encoding="utf-8")
+            for name in ("main.py", "config.py", "effects.py")
+        )
 
         self.assertIn("RAINBOW_FRAME_INTERVAL = 5", board)
         self.assertIn("RAINBOW_HUE_STEP = 1", board)
@@ -116,7 +119,10 @@ class FlowRecoveryTests(unittest.TestCase):
         self.assertIn('"流光溢彩"', source)
 
     def test_board_and_client_use_rainbow_name_without_legacy_effect_name(self):
-        board = (ROOT / "board" / "main.py").read_text(encoding="utf-8")
+        board = "\n".join(
+            (ROOT / "board" / name).read_text(encoding="utf-8")
+            for name in ("main.py", "config.py", "effects.py")
+        )
         controller = (ROOT / "client" / "controller.py").read_text(encoding="utf-8")
         bridge = (ROOT / "client" / "webui" / "webui.py").read_text(encoding="utf-8")
 
