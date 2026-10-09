@@ -39,14 +39,25 @@ class SyncStateCodecTests(unittest.TestCase):
             timing=0x1234,
             colors=((1, 2, 3), (250, 249, 248)),
             matrix=matrix_fixture(),
+            white_balance=(255, 190, 110),
         )
 
         encoded = encode_sync_snapshot(snapshot)
         decoded = decode_sync_snapshot(encoded)
 
         self.assertEqual(decoded, snapshot)
-        self.assertEqual(len(encoded), 1 + 1 + 1 + 1 + 2 + 1 + 6 + 1 + 864 * 3)
+        self.assertEqual(len(encoded), 1 + 1 + 1 + 1 + 2 + 3 + 1 + 6 + 1 + 864 * 3)
         self.assertEqual(encoded[4:6], b"\x12\x34")
+
+    def test_legacy_sync_payload_defaults_white_balance(self):
+        snapshot = SyncSnapshot(1, 10, 200, 0x1234, ((1, 2, 3),), None)
+        encoded = encode_sync_snapshot(snapshot)
+        legacy = encoded[:6] + encoded[9:]
+        legacy = bytes([1]) + legacy[1:]
+
+        decoded = decode_sync_snapshot(legacy)
+
+        self.assertEqual(decoded.white_balance, (255, 255, 255))
 
     def test_all_supported_modes_round_trip(self):
         for mode in (0, 1, 2, 3, 4, 255):
@@ -70,7 +81,7 @@ class SyncStateCodecTests(unittest.TestCase):
             decode_sync_snapshot(encoded[1:])
 
         invalid_count = bytearray(encode_sync_snapshot(SyncSnapshot(1, 0, 0, 0, (), None)))
-        invalid_count[6] = 33
+        invalid_count[9] = 33
         with self.assertRaises(PacketError):
             decode_sync_snapshot(invalid_count)
 

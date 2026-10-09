@@ -17,10 +17,18 @@ RESTART_COMMAND = b"\xF4"
 RESET_STATE_COMMAND = b"\xF5"
 PARAM_BRIGHTNESS_COMMAND = b"\xA0"
 PARAM_TIMING_COMMAND = b"\xA1"
+PARAM_WHITE_BALANCE_COMMAND = b"\xA2"
 
 
 class PacketError(ValueError):
     """Raised when a packet does not match the LED controller protocol."""
+
+
+def _byte(value: int, name: str) -> int:
+    value = int(value)
+    if not 0 <= value <= 0xFF:
+        raise ValueError(f"{name} must fit in one byte")
+    return value
 
 
 def next_sequence(seq: int) -> int:
@@ -101,6 +109,18 @@ def build_timing_packet(timing_ms: int, sequence: int = 0) -> bytes:
     if not 1 <= timing_ms <= 0xFFFF:
         raise ValueError("timing_ms must be between 1 and 65535")
     return build_packet(PARAM_TIMING_COMMAND[0], timing_ms.to_bytes(2, "big"), sequence)
+
+
+def build_white_balance_packet(red: int, green: int, blue: int, sequence: int = 0) -> bytes:
+    return build_packet(
+        PARAM_WHITE_BALANCE_COMMAND[0],
+        bytes([
+            _byte(red, "white balance red"),
+            _byte(green, "white balance green"),
+            _byte(blue, "white balance blue"),
+        ]),
+        sequence,
+    )
 
 
 def decode_packet(data: bytes) -> tuple[bytes, int, list[int]]:

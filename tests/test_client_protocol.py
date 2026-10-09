@@ -7,12 +7,14 @@ from client.protocol import (
     HANDSHAKE,
     PARAM_BRIGHTNESS_COMMAND,
     PARAM_TIMING_COMMAND,
+    PARAM_WHITE_BALANCE_COMMAND,
     RESTART_COMMAND,
     RESET_STATE_COMMAND,
     RESEND,
     SYNC_COMMAND,
     PacketError,
     build_packet,
+    build_white_balance_packet,
     build_brightness_packet,
     build_health_packet,
     build_reset_state_packet,
@@ -78,6 +80,14 @@ class ClientProtocolTests(unittest.TestCase):
         self.assertEqual(
             decode_packet(timing),
             (PARAM_TIMING_COMMAND, 0x1235, [0x01, 0x23]),
+        )
+
+    def test_white_balance_packet_uses_a2_and_three_channel_gains(self):
+        packet = build_white_balance_packet(255, 190, 110, sequence=0x1236)
+
+        self.assertEqual(
+            decode_packet(packet),
+            (PARAM_WHITE_BALANCE_COMMAND, 0x1236, [255, 190, 110]),
         )
 
     def test_restart_and_reset_state_packets_use_f4_and_f5(self):

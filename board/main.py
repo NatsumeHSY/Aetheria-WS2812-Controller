@@ -239,6 +239,7 @@ def build_sync_response(expected_seq: int) -> bytes:
         snapshot["brightness_max"],
     ])
     payload.extend(int(snapshot["timing"]).to_bytes(2, "big"))
+    payload.extend(get_global_white_balance())
     payload.append(len(colors))
     for color in colors:
         payload.extend(color)
@@ -571,6 +572,14 @@ def led_set_global_timing(length: int, payload: list) -> None:
     timing = (payload[0] << 8) | payload[1]
     set_global_timing(timing)
     save_persisted_state()
+
+def led_set_white_balance(length: int, payload: list) -> None:
+    if length != 3:
+        return
+    set_global_white_balance(payload[0], payload[1], payload[2])
+    redraw_static_snapshot()
+    save_persisted_state()
+
 def led_show(length: int, payload: list) -> None:
     DRIVER.show()
     if copy_light_snapshot()["mode"] == 4:
@@ -590,6 +599,7 @@ def exec_socket_buffer() -> None:
         b"\x08": led_show,
         PARAM_BRIGHTNESS_COMMAND: led_set_global_brightness,
         PARAM_TIMING_COMMAND: led_set_global_timing,
+        PARAM_WHITE_BALANCE_COMMAND: led_set_white_balance,
     }
 
     while not MAINTENANCE_MODE:

@@ -8,7 +8,8 @@ except ImportError:
     from protocol import PacketError
 
 
-SYNC_VERSION = 1
+SYNC_VERSION = 2
+LEGACY_SYNC_VERSION = 1
 MATRIX_ROWS = 6
 MATRIX_COLUMNS = 144
 MAX_SYNC_COLORS = 32
@@ -49,6 +50,7 @@ class SyncSnapshot:
     timing: int
     colors: tuple[tuple[int, int, int], ...]
     matrix: tuple[tuple[tuple[int, int, int], ...], ...] | None
+    white_balance: tuple[int, int, int] = (255, 255, 255)
 
     def __post_init__(self):
         if not isinstance(self.mode, int) or self.mode not in SUPPORTED_MODES:
@@ -61,8 +63,10 @@ class SyncSnapshot:
             raise ValueError("sync color count must be between 0 and 32")
         colors = tuple(_normalize_color(color, "colors[]") for color in self.colors)
         matrix = _normalize_matrix(self.matrix)
+        white_balance = _normalize_color(self.white_balance, "white_balance")
         object.__setattr__(self, "colors", colors)
         object.__setattr__(self, "matrix", matrix)
+        object.__setattr__(self, "white_balance", white_balance)
 
 
 def encode_sync_snapshot(snapshot: SyncSnapshot) -> bytes:
@@ -78,6 +82,7 @@ def encode_sync_snapshot(snapshot: SyncSnapshot) -> bytes:
         )
     )
     payload.extend(snapshot.timing.to_bytes(2, "big"))
+    payload.extend(snapshot.white_balance)
     payload.append(len(snapshot.colors))
     for color in snapshot.colors:
         payload.extend(color)
@@ -97,17 +102,19 @@ def decode_sync_snapshot(payload: bytes | bytearray | list[int]) -> SyncSnapshot
     raw = bytes(payload)
     if len(raw) < 8:
         raise _packet_error("payload is truncated")
-    if raw[0] != SYNC_VERSION:
+    version = raw[0]
+    if version not in (LEGACY_SYNC_VERSION, SYNC_VERSION):
         raise _packet_error("unsupported version")
 
     mode = raw[1]
     if mode not in SUPPORTED_MODES:
         raise _packet_error("unsupported mode")
-    color_count = raw[6]
+    color_count_offset = 6 if version == LEGACY_SYNC_VERSION else 9
+    color_count = raw[color_count_offset]
     if color_count > MAX_SYNC_COLORS:
         raise _packet_error("too many colors")
 
-    base_length = 8 + color_count * 3
+    base_length = color_count_offset + 2 + color_count * 3
     if len(raw) < base_length:
         raise _packet_error("color data is truncated")
     matrix_present = raw[base_length - 1]
@@ -118,7 +125,7 @@ def decode_sync_snapshot(payload: bytes | bytearray | list[int]) -> SyncSnapshot
         raise _packet_error("invalid matrix length")
 
     colors = []
-    offset = 7
+    offset = color_count_offset + 1
     for _ in range(color_count):
         colors.append(tuple(raw[offset:offset + 3]))
         offset += 3
@@ -143,6 +150,11 @@ def decode_sync_snapshot(payload: bytes | bytearray | list[int]) -> SyncSnapshot
             timing=int.from_bytes(raw[4:6], "big"),
             colors=tuple(colors),
             matrix=matrix,
+            white_balance=(
+                tuple(raw[6:9])
+                if version == SYNC_VERSION
+                else (255, 255, 255)
+            ),
         )
     except ValueError as exc:
         raise _packet_error(str(exc)) from exc

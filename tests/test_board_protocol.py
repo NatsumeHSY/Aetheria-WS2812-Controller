@@ -19,6 +19,7 @@ def load_extracted_board_module(name):
 def load_protocol_helpers():
     protocol = load_extracted_board_module("protocol")
     state = importlib.reload(load_extracted_board_module("state"))
+    effects = load_extracted_board_module("effects")
     tree = ast.parse(BOARD_MAIN.read_text(encoding="utf-8"))
     wanted = {
         "_blank_matrix",
@@ -53,7 +54,7 @@ def load_protocol_helpers():
         "HEALTH_COMMAND": b"\xF1",
         "SYNC_RESPONSE": b"\x04",
         "RESPONSE_SYNC": b"\x04",
-        "SYNC_VERSION": 1,
+        "SYNC_VERSION": 2,
         "LED_LINE": 6,
         "LED_DOT_PER_LINE": 144,
         "LED_COUNT": 864,
@@ -80,6 +81,7 @@ def load_protocol_helpers():
         "validate_packet": protocol.validate_packet,
         "classify_sequence": protocol.classify_sequence,
         "restore_health_session": protocol.restore_health_session,
+        "interpolate_color_state": effects.interpolate_color_state,
     })
     for name in (
         "_blank_matrix",
@@ -88,6 +90,7 @@ def load_protocol_helpers():
         "_snapshot_write",
         "copy_light_snapshot",
         "get_global_timing",
+        "get_global_white_balance",
         "update_breathe_snapshot",
         "update_fill_snapshot",
         "update_matrix_snapshot",
@@ -187,6 +190,13 @@ def load_runtime_parameter_helpers():
 
 
 class BoardProtocolTests(unittest.TestCase):
+    def test_board_exposes_white_balance_parameter_handler(self):
+        source = BOARD_MAIN.read_text(encoding="utf-8")
+
+        self.assertIn("def led_set_white_balance(length: int, payload: list)", source)
+        self.assertIn("if length != 3:", source)
+        self.assertIn("PARAM_WHITE_BALANCE_COMMAND: led_set_white_balance", source)
+
     def test_extracted_protocol_module_exports_a2_and_sequence_helpers(self):
         config = load_extracted_board_module("config")
         protocol = load_extracted_board_module("protocol")
@@ -340,9 +350,10 @@ class BoardProtocolTests(unittest.TestCase):
         self.assertTrue(valid)
         self.assertEqual(command, b"\x04")
         self.assertEqual(seq, 0xBEEF)
-        self.assertEqual(payload[0], 1)
+        self.assertEqual(payload[0], 2)
         self.assertEqual(payload[1], 4)
-        self.assertEqual(len(payload), 8 + 864 * 3)
+        self.assertEqual(tuple(payload[6:9]), (255, 255, 255))
+        self.assertEqual(len(payload), 11 + 864 * 3)
 
     def test_sync_session_restores_same_ip_without_advancing_expected_sequence(self):
         restore = load_protocol_helpers()["restore_health_session"]
