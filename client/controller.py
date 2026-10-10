@@ -7,6 +7,9 @@ from collections.abc import Iterable, Sequence
 try:
     from .protocol import (
         ACK,
+        AUDIO_COMMAND,
+        AUDIO_START_SUBTYPE,
+        AUDIO_STOP_SUBTYPE,
         HANDSHAKE,
         HEALTH_ACK,
         MAINTENANCE_COMMAND,
@@ -18,6 +21,7 @@ try:
         RESEND,
         SYNC_RESPONSE,
         build_health_packet,
+        build_audio_frame_packet,
         build_packet,
         build_sync_packet,
         decode_packet,
@@ -28,6 +32,9 @@ try:
 except ImportError:
     from protocol import (
         ACK,
+        AUDIO_COMMAND,
+        AUDIO_START_SUBTYPE,
+        AUDIO_STOP_SUBTYPE,
         HANDSHAKE,
         HEALTH_ACK,
         MAINTENANCE_COMMAND,
@@ -39,6 +46,7 @@ except ImportError:
         RESEND,
         SYNC_RESPONSE,
         build_health_packet,
+        build_audio_frame_packet,
         build_packet,
         build_sync_packet,
         decode_packet,
@@ -338,6 +346,30 @@ class LEDController:
 
     def show(self) -> int:
         return self._send_packet(0x08, b"")
+
+    def start_audio(self, colors: Iterable[Sequence[int]]) -> int:
+        color_list = list(colors)
+        if not 1 <= len(color_list) <= 8:
+            raise ValueError("audio response requires one to eight colors")
+        payload = bytearray([AUDIO_START_SUBTYPE, len(color_list)])
+        for color in color_list:
+            payload.extend(_rgb(color))
+        return self._send_packet(AUDIO_COMMAND[0], payload)
+
+    def send_audio_frame(self, frame) -> None:
+        """Send one realtime audio frame without entering reliable sequencing."""
+        if hasattr(frame, "frame_seq"):
+            frame_seq, bands, energy, beat = frame.frame_seq, frame.bands, frame.energy, frame.beat
+        else:
+            frame_seq, bands, energy, beat = frame
+        packet = build_audio_frame_packet(frame_seq, bands, energy, beat)
+        with self._lock:
+            if not self.connected:
+                raise ControllerError("controller is not connected")
+            self._ensure_socket().sendto(packet, (self.host, self.port))
+
+    def stop_audio(self) -> int:
+        return self._send_packet(AUDIO_COMMAND[0], bytes([AUDIO_STOP_SUBTYPE]))
 
     def enter_maintenance(self) -> int:
         """Stop board-side work after ACK and release the client socket."""

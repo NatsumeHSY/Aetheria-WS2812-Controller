@@ -96,7 +96,7 @@ class SyncStateCodecTests(unittest.TestCase):
 
     def test_codec_rejects_invalid_mode_color_and_brightness_values(self):
         for kwargs in (
-            {"mode": 5},
+            {"mode": 6},
             {"brightness_min": -1},
             {"brightness_max": 256},
             {"colors": ((256, 0, 0),)},

@@ -10,12 +10,14 @@ from pathlib import Path
 import webview
 
 try:
+    from audio_response import AudioResponseEffect
     from controller import ControllerError, LEDController
     from matrix_shapes import MatrixShapeStore, materialize_preset
     from media_color import MEDIA_MODE, MediaColorEffect, transition_duration_for_speed, transition_duration_for_timing
     from ui_state import UiStateStore, normalize_ui_state
     from utils import ConfigLoader
 except ImportError:
+    from ..audio_response import AudioResponseEffect
     from ..controller import ControllerError, LEDController
     from ..matrix_shapes import MatrixShapeStore, materialize_preset
     from ..media_color import MEDIA_MODE, MediaColorEffect, transition_duration_for_speed, transition_duration_for_timing
@@ -25,6 +27,7 @@ except ImportError:
 
 CLIENT_DIR = Path(__file__).resolve().parents[1]
 RAINBOW_FRAME_INTERVAL = 5
+AUDIO_MODE = "音频响应"
 
 
 class _BlankPageHandler(BaseHTTPRequestHandler):
@@ -133,12 +136,30 @@ class JavaScriptBridge:
         self.shape_store = MatrixShapeStore(CLIENT_DIR / "configs" / "matrix_shapes.json")
         self.ui_state_store = UiStateStore(CLIENT_DIR / "configs" / "ui_state.json")
         self.media_effect = MediaColorEffect(self.controller)
+        self.audio_effect = AudioResponseEffect(self.controller)
         self._ui_ready_callback = None
 
     def _stop_media_effect(self) -> None:
         effect = getattr(self, "media_effect", None)
         if effect is not None:
             effect.deactivate()
+
+    def _stop_audio_effect(self) -> None:
+        effect = getattr(self, "audio_effect", None)
+        if effect is not None:
+            effect.stop()
+
+    def _restore_saved_audio(self) -> None:
+        effect = getattr(self, "audio_effect", None)
+        if effect is None or effect.status().get("active"):
+            return
+        state = self.ui_state_store.load()
+        if state is None or state.get("mode") != AUDIO_MODE:
+            return
+        try:
+            effect.activate(_settings_colors(state))
+        except (ControllerError, OSError, ValueError, RuntimeError) as error:
+            return {"error": str(error)}
 
     def media_status(self) -> dict:
         effect = getattr(self, "media_effect", None)
@@ -148,7 +169,16 @@ class JavaScriptBridge:
             "media": effect.status() if effect is not None else {"active": False},
         }
 
+    def audio_status(self) -> dict:
+        effect = getattr(self, "audio_effect", None)
+        return {
+            "ok": True,
+            "connected": self.controller.connected,
+            "audio": effect.status() if effect is not None else {"active": False},
+        }
+
     def close(self) -> None:
+        self._stop_audio_effect()
         effect = getattr(self, "media_effect", None)
         if effect is not None:
             effect.close()
@@ -168,6 +198,8 @@ class JavaScriptBridge:
             if effect is not None:
                 effect.suspend()
             connected = self.controller.connect()
+            if connected:
+                self._restore_saved_audio()
             return {
                 "ok": connected,
                 "connected": connected,
@@ -177,11 +209,13 @@ class JavaScriptBridge:
             return {"ok": False, "connected": False, "recovered": False, "error": str(error)}
 
     def disconnect(self) -> dict:
+        self._stop_audio_effect()
         self._stop_media_effect()
         self.controller.disconnect()
         return {"ok": True, "connected": False}
 
     def enter_maintenance(self) -> dict:
+        self._stop_audio_effect()
         self._stop_media_effect()
         try:
             if not self.controller.connected and not self.controller.connect():
@@ -209,6 +243,10 @@ class JavaScriptBridge:
             connected = self.controller.health()
             if not connected and effect is not None:
                 effect.suspend()
+            if not connected:
+                self._stop_audio_effect()
+            elif connected and not was_connected:
+                self._restore_saved_audio()
             result = {"ok": connected, "connected": connected}
             if connected and not was_connected:
                 result["recovered"] = True
@@ -261,6 +299,7 @@ class JavaScriptBridge:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
 
     def restart(self) -> dict:
+        self._stop_audio_effect()
         self._stop_media_effect()
         try:
             if not self.controller.connected and not self.controller.connect():
@@ -272,6 +311,7 @@ class JavaScriptBridge:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
 
     def reset_state(self) -> dict:
+        self._stop_audio_effect()
         self._stop_media_effect()
         try:
             if not self.controller.connected and not self.controller.connect():
@@ -322,6 +362,9 @@ class JavaScriptBridge:
                 [_rgb_hex(color) for color in row]
                 for row in snapshot.matrix
             ]
+        elif mode == 5:
+            state["mode"] = AUDIO_MODE
+            state["colors"] = state["colors"] or ["#000000"]
         else:
             raise ValueError("board snapshot mode cannot be represented by the client")
         return state
@@ -332,6 +375,10 @@ class JavaScriptBridge:
                 return {"ok": False, "connected": False, "error": "无法同步：设备未连接"}
             snapshot = self.controller.sync()
             state = self._snapshot_to_ui_state(snapshot)
+            if state.get("mode") == AUDIO_MODE:
+                effect = getattr(self, "audio_effect", None)
+                if effect is not None and not effect.status().get("active"):
+                    effect.activate(_settings_colors(state))
             effect = getattr(self, "media_effect", None)
             if effect is not None and effect.status()["active"]:
                 state.update(mode=MEDIA_MODE, source="quick", colors=[])
@@ -350,6 +397,7 @@ class JavaScriptBridge:
     def save_state(self, state: dict) -> dict:
         try:
             normalized = normalize_ui_state(state)
+            self._last_settings = normalized
             return {"ok": True, "state": self.ui_state_store.save(normalized)}
         except (OSError, TypeError, ValueError) as error:
             return {"ok": False, "error": str(error)}
@@ -361,11 +409,21 @@ class JavaScriptBridge:
         mode = settings.get("mode", "静态常亮")
 
         if mode == MEDIA_MODE:
+            self._stop_audio_effect()
             duration = transition_duration_for_speed(settings.get("speed", 50))
             self.media_effect.activate(color, brightness, duration)
             return None
 
         self._stop_media_effect()
+
+        if mode == AUDIO_MODE:
+            effect = getattr(self, "audio_effect", None)
+            if effect is None:
+                raise ControllerError("audio response effect is unavailable")
+            effect.activate(colors)
+            return None
+
+        self._stop_audio_effect()
 
         if mode == "静态常亮":
             return self.controller.fill(color, brightness)
@@ -390,6 +448,8 @@ class JavaScriptBridge:
             result = {"ok": True, "connected": True, "sequence": seq}
             if settings.get("mode") == MEDIA_MODE:
                 result["media"] = self.media_effect.status()
+            if settings.get("mode") == AUDIO_MODE:
+                result["audio"] = self.audio_effect.status()
             return result
         except (ControllerError, OSError, ValueError) as error:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
@@ -399,6 +459,7 @@ class JavaScriptBridge:
             if not self.controller.connected and not self.controller.connect():
                 return {"ok": False, "connected": False, "error": "无法连接 ESP32"}
             if not enabled:
+                self._stop_audio_effect()
                 self._stop_media_effect()
                 seq = self.controller.clear()
             else:
@@ -408,6 +469,7 @@ class JavaScriptBridge:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
 
     def _send_matrix(self, matrix: list, brightness: int = 255) -> int:
+        self._stop_audio_effect()
         self._stop_media_effect()
         pixels = []
         for row, values in enumerate(matrix[:6]):

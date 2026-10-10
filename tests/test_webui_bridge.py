@@ -59,6 +59,42 @@ class SyncBridgeController(ShapeBridgeController):
         return self.snapshot
 
 
+class AudioBridgeController(ShapeBridgeController):
+    def __init__(self, calls):
+        super().__init__()
+        self.calls = calls
+
+    def start_audio(self, colors):
+        self.calls.append(("start_audio", colors))
+        return 20
+
+    def stop_audio(self):
+        self.calls.append(("stop_audio",))
+        return 21
+
+    def disconnect(self):
+        self.calls.append(("disconnect",))
+        self.connected = False
+
+
+class FakeAudioEffect:
+    def __init__(self, calls):
+        self.calls = calls
+        self._status = {"active": False, "error": ""}
+
+    def activate(self, colors):
+        self.calls.append(("start_audio", tuple(colors)))
+        self._status = {"active": True, "error": ""}
+        return dict(self._status)
+
+    def stop(self):
+        self.calls.append(("audio_effect_stop",))
+        self._status["active"] = False
+
+    def status(self):
+        return dict(self._status)
+
+
 class WebUiBridgeTests(unittest.TestCase):
     def make_bridge(self, store):
         bridge = JavaScriptBridge.__new__(JavaScriptBridge)
@@ -203,6 +239,24 @@ class WebUiBridgeTests(unittest.TestCase):
             self.assertTrue(saved["ok"])
             self.assertEqual(bridge.load_state()["state"], saved["state"])
             self.assertFalse(bridge.save_state({"version": 99})["ok"])
+
+    def test_audio_mode_starts_audio_effect_and_disconnect_stops_it_first(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+            bridge = self.make_bridge(MatrixShapeStore(Path(directory) / "shapes.json"))
+            bridge.controller = AudioBridgeController(calls)
+            bridge.audio_effect = FakeAudioEffect(calls)
+
+            result = bridge._apply_mode({
+                "mode": "音频响应",
+                "colors": ["#112233", "#445566"],
+                "brightness": 72,
+            })
+            self.assertIsNone(result)
+            self.assertEqual(calls, [("start_audio", ((17, 34, 51), (68, 85, 102)))])
+
+            bridge.disconnect()
+            self.assertEqual(calls[-2:], [("audio_effect_stop",), ("disconnect",)])
 
 
 if __name__ == "__main__":
