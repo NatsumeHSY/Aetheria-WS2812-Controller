@@ -23,6 +23,19 @@ MAX_COVER_BYTES = 5 * 1024 * 1024
 TRANSITION_MS = 800
 
 
+def transition_duration_for_timing(timing_ms: int) -> int:
+    """Keep 40 rhythm intervals per media fade, within 200–4000 ms."""
+    interval = max(5, min(100, int(timing_ms)))
+    return interval * 40
+
+
+def transition_duration_for_speed(speed: int) -> int:
+    """Map the UI's 10–200 speed scale to a fade duration in milliseconds."""
+    value = max(10, min(200, int(speed)))
+    interval = int(1000 / value + 0.5)  # Match JavaScript Math.round in the slider handler.
+    return transition_duration_for_timing(interval)
+
+
 @dataclass(frozen=True)
 class MediaSnapshot:
     playing: bool
@@ -209,6 +222,18 @@ class MediaColorEffect:
                     self._last_target = None
                 else:
                     self._last_target = (*self._last_target[:3], self._brightness)
+            self._generation += 1
+            self._wake.set()
+
+    def set_duration(self, value):
+        duration = max(200, min(4000, int(value)))
+        with self.lock:
+            if duration == self._duration:
+                return
+            self._duration = duration
+            if self._last_target is not None and time.monotonic() < self._transition_until:
+                # Retarget an in-flight fade using the newly selected tempo.
+                self._last_target = None
             self._generation += 1
             self._wake.set()
 

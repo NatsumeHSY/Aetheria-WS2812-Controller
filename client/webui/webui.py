@@ -12,13 +12,13 @@ import webview
 try:
     from controller import ControllerError, LEDController
     from matrix_shapes import MatrixShapeStore, materialize_preset
-    from media_color import MEDIA_MODE, MediaColorEffect
+    from media_color import MEDIA_MODE, MediaColorEffect, transition_duration_for_speed, transition_duration_for_timing
     from ui_state import UiStateStore, normalize_ui_state
     from utils import ConfigLoader
 except ImportError:
     from ..controller import ControllerError, LEDController
     from ..matrix_shapes import MatrixShapeStore, materialize_preset
-    from ..media_color import MEDIA_MODE, MediaColorEffect
+    from ..media_color import MEDIA_MODE, MediaColorEffect, transition_duration_for_speed, transition_duration_for_timing
     from ..ui_state import UiStateStore, normalize_ui_state
     from ..utils import ConfigLoader
 
@@ -236,7 +236,11 @@ class JavaScriptBridge:
         try:
             if not self.controller.connected and not self.controller.connect():
                 return {"ok": False, "connected": False, "error": "无法连接 ESP32"}
-            sequence = self.controller.set_timing(max(1, min(0xFFFF, int(timing_ms))))
+            timing = max(1, min(0xFFFF, int(timing_ms)))
+            sequence = self.controller.set_timing(timing)
+            effect = getattr(self, "media_effect", None)
+            if effect is not None and effect.status()["active"]:
+                effect.set_duration(transition_duration_for_timing(timing))
             return {"ok": True, "connected": True, "sequence": sequence}
         except (ControllerError, OSError, ValueError) as error:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
@@ -357,7 +361,8 @@ class JavaScriptBridge:
         mode = settings.get("mode", "静态常亮")
 
         if mode == MEDIA_MODE:
-            self.media_effect.activate(color, brightness)
+            duration = transition_duration_for_speed(settings.get("speed", 50))
+            self.media_effect.activate(color, brightness, duration)
             return None
 
         self._stop_media_effect()
