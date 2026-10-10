@@ -4,7 +4,7 @@
 
 **Goal:** Add a low-latency audio-response mode in which the Windows client sends compact spectrum frames and the ESP32-C3 renders multi-center water waves locally.
 
-**Architecture:** Add a Windows WASAPI loopback capture/analyzer pipeline in the client, a dedicated non-blocking realtime F7 packet path, and a board-side AudioWaveEffector that consumes only the latest spectrum state. Keep F6/F8 as reliable mode lifecycle commands, preserve the existing reliable command sequence independently from audio_seq, and retain all current logical RGB, brightness, timing, white-balance, sync, and persistence semantics.
+**Architecture:** Add a Windows WASAPI loopback capture/analyzer pipeline in the client, a dedicated non-blocking realtime 0x0A/0x01 packet path, and a board-side AudioWaveEffector that consumes only the latest spectrum state. Keep 0x0A/0x00 and 0x0A/0x02 as reliable mode lifecycle subtypes, preserve the existing reliable command sequence independently from audio_seq, and retain all current logical RGB, brightness, timing, white-balance, sync, and persistence semantics.
 
 **Tech Stack:** Python 3.13 on Windows, soundcard>=0.4.4,<0.5 WASAPI loopback backend, numpy>=2.4,<2.5 FFT analysis, MicroPython on ESP32-C3, NeoPixel, UDP, existing CRC4 packet protocol, pywebview dynamic UI, pytest/unittest-compatible tests, Node syntax checks for browser JavaScript.
 
@@ -15,9 +15,9 @@
 - The audio source is the Windows default system playback mix through WASAPI Loopback.
 - FFT uses 48 kHz mono input, a 1024-sample Hann window, 512-sample hop, and publishes at most 30 audio frames per second.
 - Each audio frame contains eight 0~255 bands, one overall energy byte, one beat byte, and an independent 16-bit audio_seq.
-- F0 remains handshake; F1~F5 remain health, sync, maintenance, restart, and reset; F6 is audio start, F7 is realtime audio frame, and F8 is audio stop.
-- 0x0A remains unused.
-- F7 uses CRC and packet-length validation but does not enter the reliable EXPECTED_SEQ window, does not ACK, and does not retry.
+- F0 remains handshake; F1~F5 remain health, sync, maintenance, restart, and reset; 0x0A is the audio-response effect command.
+- 0x0A/0x00 starts/configures audio response, 0x0A/0x01 carries realtime audio frames, and 0x0A/0x02 stops audio response.
+- 0x0A/0x01 uses CRC and packet-length validation but does not enter the reliable EXPECTED_SEQ window, does not ACK, and does not retry.
 - The reliable controller sequence, history, ACK, resend, and 0xFFFF -> 0x0000 behavior remain unchanged by audio frames.
 - The board renders at a practical 25~30 FPS because transmitting all 864 WS2812 pixels already takes approximately 26 ms per frame.
 - Audio mode uses the first quick color as the base color and cycles additional quick colors across the fixed wave centers.
@@ -27,7 +27,7 @@
 
 ## Review Focus
 
-- F7 packet loss or reordering must never trigger ordinary command resend or block the next reliable command; cover this in protocol and controller tests.
+- 0x0A/0x01 packet loss or reordering must never trigger ordinary command resend or block the next reliable command; cover this in protocol and controller tests.
 - A stale or stopped audio sender must decay and exit on the board instead of freezing the last frame; cover this in board audio-wave tests.
 - Audio mode must stop before every mode/lifecycle transition so old frames cannot overwrite static, matrix, maintenance, restart, or reset actions; cover this in bridge tests.
 - Silent input, missing loopback device, malformed PCM, and FFT-sized edge cases must yield safe zeroed output or a visible error, not a process crash; cover this in analyzer and capture tests.
@@ -106,7 +106,7 @@
 
   Run git add client/audio_capture.py tests/test_audio_capture.py and commit with feat: add WASAPI loopback capture worker.
 
-### Task 3: Add F6/F7/F8 packet builders and independent audio sequence handling
+### Task 3: Add 0x0A audio subcommands and independent audio sequence handling
 
 **Files:**
 - Modify: board/config.py
@@ -117,7 +117,7 @@
 - Modify: tests/test_client_protocol.py
 
 **Interfaces:**
-- Board/client constants: AUDIO_START_COMMAND = b"\xF6", AUDIO_FRAME_COMMAND = b"\xF7", AUDIO_STOP_COMMAND = b"\xF8".
+- Board/client constants: AUDIO_COMMAND = b"\x0A", AUDIO_START_SUBTYPE = 0x00, AUDIO_FRAME_SUBTYPE = 0x01, AUDIO_STOP_SUBTYPE = 0x02.
 - Audio-frame packet payload encoder/decoder for audio_seq, energy, beat, and eight bands.
 - build_audio_start_packet(colors, sequence) -> bytes.
 - build_audio_frame_packet(frame_seq, bands, energy, beat) -> bytes.
@@ -126,15 +126,15 @@
 
 - [ ] Step 1: Write failing protocol tests
 
-  Pin F6/F7/F8 command bytes, the F6 color payload, the fixed F7 payload layout, CRC validation, rejection of malformed lengths/ranges, reliable sequence independence, duplicate/late F7 rejection, and audio_seq wrap from 0xFFFF to 0x0000.
+  Pin the 0x0A command and 0x00/0x01/0x02 subtypes, the start color payload, the fixed realtime-frame payload layout, CRC validation, rejection of malformed lengths/ranges, reliable sequence independence, duplicate/late frame rejection, and audio_seq wrap from 0xFFFF to 0x0000.
 
 - [ ] Step 2: Add command constants and pure audio packet helpers
 
-  Keep F0~F5 and 0x0A unchanged. Reuse current header/trailer CRC calculation. F7 must use header sequence 0 and carry its own audio_seq in payload.
+  Keep F0~F5 unchanged and assign 0x0A to the audio effect. Reuse current header/trailer CRC calculation. The realtime subtype must use header sequence 0 and carry its own audio_seq in payload.
 
 - [ ] Step 3: Add the board realtime dispatch boundary
 
-  In the socket loop, validate F7 packet length/CRC before reliable sequence classification. Accept it only from the current client address, classify its payload sequence independently, update the latest audio state, and skip ACK/history/ordinary resend behavior. Route F6/F8 through the existing reliable path.
+  In the socket loop, validate 0x0A/0x01 packet length/CRC before reliable sequence classification. Accept it only from the current client address, classify its payload sequence independently, update the latest audio state, and skip ACK/history/ordinary resend behavior. Route 0x0A/0x00 and 0x0A/0x02 through the existing reliable path.
 
 - [ ] Step 4: Run protocol tests
 
@@ -177,7 +177,7 @@
 
 - [ ] Step 4: Integrate stop/generation behavior with Effector
 
-  Ensure starting audio invalidates the prior effect generation, F8 or mode changes stop the audio renderer, and the renderer exits after the 200 ms watchdog timeout. Keep existing scan-line, rainbow, breathe, transition, and matrix behavior unchanged.
+  Ensure starting audio invalidates the prior effect generation, 0x0A/0x02 or mode changes stop the audio renderer, and the renderer exits after the 200 ms watchdog timeout. Keep existing scan-line, rainbow, breathe, transition, and matrix behavior unchanged.
 
 - [ ] Step 5: Run board audio tests
 
@@ -208,19 +208,19 @@
 
 - [ ] Step 1: Write controller and bridge tests
 
-  Assert F6/F8 use ordinary ACK/retry sequencing, F7 sends without waiting for ACK and without changing _sequence or _history, the newest frame replaces an older pending frame, and bridge lifecycle methods stop audio before disconnect/maintenance/restart/reset.
+  Assert 0x0A/0x00 and 0x0A/0x02 use ordinary ACK/retry sequencing, 0x0A/0x01 sends without waiting for ACK and without changing _sequence or _history, the newest frame replaces an older pending frame, and bridge lifecycle methods stop audio before disconnect/maintenance/restart/reset.
 
 - [ ] Step 2: Implement controller packet methods
 
-  Add reliable F6/F8 calls through _send_packet() and a locked send_audio_frame() path that sends one F7 packet with socket.sendto() only. Keep existing socket ownership and connection error semantics.
+  Add reliable 0x0A start/stop calls through _send_packet() and a locked send_audio_frame() path that sends one 0x0A/0x01 packet with socket.sendto() only. Keep existing socket ownership and connection error semantics.
 
 - [ ] Step 3: Implement AudioResponseEffect
 
-  Compose AudioCaptureWorker, SpectrumAnalyzer, and controller methods. Start the capture thread only after F6 succeeds, publish status snapshots under a lock, and stop/join the worker before any mode or lifecycle command.
+  Compose AudioCaptureWorker, SpectrumAnalyzer, and controller methods. Start the capture thread only after 0x0A/0x00 succeeds, publish status snapshots under a lock, and stop/join the worker before any mode or lifecycle command.
 
 - [ ] Step 4: Integrate bridge mode handling
 
-  Add "音频响应" to _apply_mode(), connect(), disconnect(), health(), enter_maintenance(), restart(), and reset_state() handling. Make reconnect/sync reissue F6 when saved local mode is audio response.
+  Add "音频响应" to _apply_mode(), connect(), disconnect(), health(), enter_maintenance(), restart(), and reset_state() handling. Make reconnect/sync reissue 0x0A/0x00 when saved local mode is audio response.
 
 - [ ] Step 5: Run client audio tests
 
@@ -297,7 +297,7 @@
 
 - [ ] Step 3: Review realtime protocol invariants
 
-  Inspect tests and code to confirm F7 never calls ACK/history/resend, never advances reliable seq, and uses CRC/length validation plus independent wrap-safe audio_seq.
+  Inspect tests and code to confirm 0x0A/0x01 never calls ACK/history/resend, never advances reliable seq, and uses CRC/length validation plus independent wrap-safe audio_seq.
 
 - [ ] Step 4: Review lifecycle invariants
 
