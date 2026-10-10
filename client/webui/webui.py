@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from contextlib import nullcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -11,11 +12,13 @@ import webview
 try:
     from controller import ControllerError, LEDController
     from matrix_shapes import MatrixShapeStore, materialize_preset
+    from media_color import MEDIA_MODE, MediaColorEffect
     from ui_state import UiStateStore, normalize_ui_state
     from utils import ConfigLoader
 except ImportError:
     from ..controller import ControllerError, LEDController
     from ..matrix_shapes import MatrixShapeStore, materialize_preset
+    from ..media_color import MEDIA_MODE, MediaColorEffect
     from ..ui_state import UiStateStore, normalize_ui_state
     from ..utils import ConfigLoader
 
@@ -129,7 +132,27 @@ class JavaScriptBridge:
         )
         self.shape_store = MatrixShapeStore(CLIENT_DIR / "configs" / "matrix_shapes.json")
         self.ui_state_store = UiStateStore(CLIENT_DIR / "configs" / "ui_state.json")
+        self.media_effect = MediaColorEffect(self.controller)
         self._ui_ready_callback = None
+
+    def _stop_media_effect(self) -> None:
+        effect = getattr(self, "media_effect", None)
+        if effect is not None:
+            effect.deactivate()
+
+    def media_status(self) -> dict:
+        effect = getattr(self, "media_effect", None)
+        return {
+            "ok": True,
+            "connected": self.controller.connected,
+            "media": effect.status() if effect is not None else {"active": False},
+        }
+
+    def close(self) -> None:
+        effect = getattr(self, "media_effect", None)
+        if effect is not None:
+            effect.close()
+        self.controller.disconnect()
 
     def set_ui_ready_callback(self, callback) -> None:
         self._ui_ready_callback = callback
@@ -141,6 +164,9 @@ class JavaScriptBridge:
 
     def connect(self) -> dict:
         try:
+            effect = getattr(self, "media_effect", None)
+            if effect is not None:
+                effect.suspend()
             connected = self.controller.connect()
             return {
                 "ok": connected,
@@ -151,10 +177,12 @@ class JavaScriptBridge:
             return {"ok": False, "connected": False, "recovered": False, "error": str(error)}
 
     def disconnect(self) -> dict:
+        self._stop_media_effect()
         self.controller.disconnect()
         return {"ok": True, "connected": False}
 
     def enter_maintenance(self) -> dict:
+        self._stop_media_effect()
         try:
             if not self.controller.connected and not self.controller.connect():
                 return {"ok": False, "connected": False, "error": "无法连接 ESP32"}
@@ -174,8 +202,17 @@ class JavaScriptBridge:
 
     def health(self) -> dict:
         try:
+            was_connected = self.controller.connected
+            effect = getattr(self, "media_effect", None)
+            if not was_connected and effect is not None:
+                effect.suspend()
             connected = self.controller.health()
-            return {"ok": connected, "connected": connected}
+            if not connected and effect is not None:
+                effect.suspend()
+            result = {"ok": connected, "connected": connected}
+            if connected and not was_connected:
+                result["recovered"] = True
+            return result
         except (ControllerError, OSError, ValueError) as error:
             return {"ok": False, "connected": False, "error": str(error)}
 
@@ -183,7 +220,14 @@ class JavaScriptBridge:
         try:
             if not self.controller.connected and not self.controller.connect():
                 return {"ok": False, "connected": False, "error": "无法连接 ESP32"}
-            sequence = self.controller.set_brightness(_brightness(value))
+            effect = getattr(self, "media_effect", None)
+            brightness = _brightness(value)
+            # Invalidate an in-flight cover read atomically with its A0 ACK.
+            # The worker takes this same lock before sending a transition.
+            with effect.lock if effect is not None else nullcontext():
+                sequence = self.controller.set_brightness(brightness)
+                if effect is not None:
+                    effect.set_brightness(brightness)
             return {"ok": True, "connected": True, "sequence": sequence}
         except (ControllerError, OSError, ValueError) as error:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
@@ -213,6 +257,7 @@ class JavaScriptBridge:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
 
     def restart(self) -> dict:
+        self._stop_media_effect()
         try:
             if not self.controller.connected and not self.controller.connect():
                 return {"ok": False, "connected": False, "error": "无法连接 ESP32"}
@@ -223,6 +268,7 @@ class JavaScriptBridge:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
 
     def reset_state(self) -> dict:
+        self._stop_media_effect()
         try:
             if not self.controller.connected and not self.controller.connect():
                 return {"ok": False, "connected": False, "error": "无法连接 ESP32"}
@@ -281,10 +327,14 @@ class JavaScriptBridge:
             if not self.controller.connected:
                 return {"ok": False, "connected": False, "error": "无法同步：设备未连接"}
             snapshot = self.controller.sync()
+            state = self._snapshot_to_ui_state(snapshot)
+            effect = getattr(self, "media_effect", None)
+            if effect is not None and effect.status()["active"]:
+                state.update(mode=MEDIA_MODE, source="quick", colors=[])
             return {
                 "ok": True,
                 "connected": True,
-                "state": self._snapshot_to_ui_state(snapshot),
+                "state": state,
             }
         except (ControllerError, OSError, ValueError, TypeError) as error:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
@@ -300,11 +350,17 @@ class JavaScriptBridge:
         except (OSError, TypeError, ValueError) as error:
             return {"ok": False, "error": str(error)}
 
-    def _apply_mode(self, settings: dict) -> int:
+    def _apply_mode(self, settings: dict) -> int | None:
         colors = _settings_colors(settings)
         color = colors[0]
         brightness = _brightness(settings.get("brightness", 80))
         mode = settings.get("mode", "静态常亮")
+
+        if mode == MEDIA_MODE:
+            self.media_effect.activate(color, brightness)
+            return None
+
+        self._stop_media_effect()
 
         if mode == "静态常亮":
             return self.controller.fill(color, brightness)
@@ -326,7 +382,10 @@ class JavaScriptBridge:
             if not self.controller.connected and not self.controller.connect():
                 return {"ok": False, "connected": False, "error": "无法连接 ESP32"}
             seq = self._apply_mode(settings)
-            return {"ok": True, "connected": True, "sequence": seq}
+            result = {"ok": True, "connected": True, "sequence": seq}
+            if settings.get("mode") == MEDIA_MODE:
+                result["media"] = self.media_effect.status()
+            return result
         except (ControllerError, OSError, ValueError) as error:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
 
@@ -335,6 +394,7 @@ class JavaScriptBridge:
             if not self.controller.connected and not self.controller.connect():
                 return {"ok": False, "connected": False, "error": "无法连接 ESP32"}
             if not enabled:
+                self._stop_media_effect()
                 seq = self.controller.clear()
             else:
                 seq = self._apply_mode(settings or {})
@@ -343,6 +403,7 @@ class JavaScriptBridge:
             return {"ok": False, "connected": self.controller.connected, "error": str(error)}
 
     def _send_matrix(self, matrix: list, brightness: int = 255) -> int:
+        self._stop_media_effect()
         pixels = []
         for row, values in enumerate(matrix[:6]):
             for column, value in enumerate(values[:144]):
@@ -406,6 +467,7 @@ class JavaScriptBridge:
 
 class WebviewWindow:
     def __init__(self, bridge: JavaScriptBridge) -> None:
+        self.bridge = bridge
         loader = ConfigLoader("config.json")
         config = loader.read_config()
         self.config = config
@@ -475,3 +537,4 @@ class WebviewWindow:
         finally:
             # Also clean up when the window closes before ``loaded`` fires.
             self._blank_server.stop()
+            self.bridge.close()

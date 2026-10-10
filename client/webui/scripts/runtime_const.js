@@ -202,6 +202,12 @@ window.htmlHeadContent = `
   .white-balance-reset { width: 100%; margin-top: 10px; padding: 7px 9px; color: var(--ink-muted); font-size: 11px; }
   .mode-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .mode-button { min-height: 40px; padding: 8px 10px; color: var(--ink-muted); font-size: 12px; text-align: left; }
+  .media-color-status { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-deep); }
+  .media-color-status[hidden] { display: none; }
+  .media-color-swatch { width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--teal); }
+  .media-color-copy { display: grid; min-width: 0; gap: 4px; }
+  .media-color-label { color: var(--ink); font-size: 11px; }
+  .media-color-detail { color: var(--ink-muted); font-size: 10px; overflow-wrap: anywhere; }
   .palette-list { display: grid; height: 184px; gap: 8px; align-content: start; overflow-y: scroll; padding: 8px 6px 8px 8px; border: 1px solid var(--line); border-radius: 12px; scrollbar-color: var(--teal) transparent; }
   .palette-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: center; }
   .palette-row.removable { grid-template-columns: minmax(0, 1fr) auto; }
@@ -287,7 +293,9 @@ window.htmlBodyContent = `
       </div>
       <div class="control-section"><div class="control-label"><span>亮度</span><span class="value-display" id="brightValue">72%</span></div><input id="brightness" type="range" min="0" max="100" value="72" /></div>
       <div class="control-section"><div class="control-label"><span>节奏</span><span class="value-display" id="speedValue">50</span></div><input id="speed" type="range" min="10" max="200" value="50" /></div>
-      <div class="control-section"><div class="control-label"><span>快捷效果</span><span class="value-display">3 presets</span></div><div class="mode-grid"><button class="mode-btn mode-button active" type="button">静态常亮</button><button class="mode-btn mode-button" type="button">呼吸渐变</button><button class="mode-btn mode-button" type="button">流光溢彩</button></div></div>
+      <div class="control-section"><div class="control-label"><span>快捷效果</span><span class="value-display">4 effects</span></div><div class="mode-grid"><button class="mode-btn mode-button active" type="button">静态常亮</button><button class="mode-btn mode-button" type="button">呼吸渐变</button><button class="mode-btn mode-button" type="button">流光溢彩</button><button class="mode-btn mode-button" type="button">媒体封面</button></div>
+        <div class="media-color-status" id="mediaColorStatus" aria-live="polite" hidden><span class="media-color-swatch" id="mediaColorSwatch" aria-hidden="true"></span><span class="media-color-copy"><span class="media-color-label" id="mediaColorLabel">使用默认快捷颜色</span><span class="media-color-detail" id="mediaColorDetail">暂无媒体播放 · 平滑回退</span></span></div>
+      </div>
     </aside>
   </section>
 

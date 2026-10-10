@@ -11,7 +11,7 @@ MATRIX_ROWS = 6
 MATRIX_COLUMNS = 144
 MAX_COLORS = 64
 VALID_SOURCES = frozenset(("quick", "matrix"))
-VALID_MODES = frozenset(("静态常亮", "呼吸渐变", "流光溢彩", "自定义矩阵"))
+VALID_MODES = frozenset(("静态常亮", "呼吸渐变", "流光溢彩", "媒体封面", "自定义矩阵"))
 
 
 def _require_int(value, field: str, minimum: int, maximum: int) -> int:

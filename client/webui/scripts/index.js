@@ -18,6 +18,10 @@ let whiteBalanceTimer = null;
 let activeModalResolve = null;
 let activeModalMode = "notice";
 let modalPreviousFocus = null;
+let mediaStatusTimer = null;
+let mediaStatusInFlight = false;
+let mediaRunning = false;
+const MEDIA_MODE = "媒体封面";
 
 function renderPage() {
     document.querySelector("head").innerHTML = window.htmlHeadContent;
@@ -327,6 +331,7 @@ function currentSettings() {
     const mode = currentMode === "自定义矩阵" ? currentMode : (activeMode || currentMode);
     const source = mode === "自定义矩阵" ? "matrix" : "quick";
     return {
+        version: 1,
         color: colors[0] || "#ff0080",
         colors,
         source,
@@ -380,6 +385,7 @@ function applyUiState(state) {
             currentMode !== "自定义矩阵" && button.textContent.trim() === currentMode,
         );
     });
+    updateMediaVisibility();
     if (Array.isArray(state.matrix144x6) && state.matrix144x6.length === ROWS) {
         matrixData = cloneMatrix(state.matrix144x6);
         renderMatrix();
@@ -392,6 +398,11 @@ function applySyncedState(state, fallback) {
     const base = fallback || currentSettings();
     const merged = { ...base, ...state };
     if (fallback?.paintColor) merged.paintColor = fallback.paintColor;
+    if (base.mode === MEDIA_MODE) {
+        merged.mode = MEDIA_MODE;
+        merged.source = "quick";
+        merged.colors = base.colors;
+    }
     if ((state.mode === "流光溢彩" || state.mode === "彩虹跑马") && (!Array.isArray(state.colors) || !state.colors.length)) {
         const fallbackColors = Array.isArray(fallback?.colors) && fallback.colors.length
             ? fallback.colors
@@ -409,8 +420,62 @@ async function syncBoardState(fallback = null) {
     const synced = await bridgeCall("sync");
     if (synced.ok) {
         applySyncedState(synced.state, fallback || currentSettings());
+        await resumeMediaEffect();
     }
     return synced;
+}
+
+function updateMediaVisibility() {
+    const panel = document.getElementById("mediaColorStatus");
+    if (panel) panel.hidden = currentMode !== MEDIA_MODE;
+}
+
+function renderMediaStatus(media) {
+    mediaRunning = media?.active === true && media?.suspended !== true;
+    updateMediaVisibility();
+    const label = document.getElementById("mediaColorLabel");
+    const detail = document.getElementById("mediaColorDetail");
+    const swatch = document.getElementById("mediaColorSwatch");
+    if (!label || !detail || !swatch) return;
+    label.textContent = media?.source === "cover" ? "正在跟随封面主色" : "使用默认快捷颜色";
+    detail.textContent = media?.error || (media?.source === "cover"
+        ? ([media.title, media.artist].filter(Boolean).join(" · ") || "封面颜色已提取")
+        : (media?.playing ? "封面为空或不可用 · 平滑回退" : "暂无媒体播放 · 平滑回退"));
+    if (!mediaRunning) detail.textContent = maintenanceMode ? "维护模式 · 已停止跟随" : "等待连接并启用封面跟随";
+    if (media?.suspended && !maintenanceMode) detail.textContent = "等待设备同步后恢复封面跟随";
+    swatch.style.backgroundColor = media?.color || getPaletteColors()[0] || "#d88773";
+}
+
+async function refreshMediaStatus() {
+    if (currentMode !== MEDIA_MODE || mediaStatusInFlight) return;
+    mediaStatusInFlight = true;
+    try {
+        const result = await bridgeApiCall("media_status");
+        if (result.ok) renderMediaStatus(result.media);
+    } finally {
+        mediaStatusInFlight = false;
+    }
+}
+
+function applyEffectSettings(settings) {
+    if (maintenanceMode) {
+        setStatus("维护模式下请先恢复连接", false);
+        return Promise.resolve({ ok: false, maintenance: true });
+    }
+    if (settings.mode !== MEDIA_MODE) return bridgeCall("apply", settings);
+    // Starting the client worker is not a board ACK. Do not refresh the
+    // device heartbeat until an actual health/command response arrives.
+    return bridgeApiCall("apply", settings).then(result => {
+        if (!result.ok) setStatus(result.error || "媒体封面效果启动失败", result.connected === false ? false : null);
+        return result;
+    });
+}
+
+async function resumeMediaEffect() {
+    if (currentMode !== MEDIA_MODE || maintenanceMode) return;
+    const result = await applyEffectSettings(currentSettings());
+    if (result.ok) renderMediaStatus(result.media);
+    return result;
 }
 
 async function restoreLocalState() {
@@ -609,7 +674,15 @@ function loadShape(shapeId) {
 async function sendShape(shapeId) {
     const brightness = Math.round(Number(document.getElementById("brightness").value) * 255 / 100);
     const paintColor = document.getElementById("paintColorPicker")?.value || "#8dc9bc";
-    return bridgeCall("send_shape", shapeId, brightness, paintColor);
+    const result = await bridgeCall("send_shape", shapeId, brightness, paintColor);
+    if (result.ok) {
+        selectMatrixSource();
+        mediaRunning = false;
+        updateMediaVisibility();
+        setMatrixState("形状已发送");
+        schedulePersist();
+    }
+    return result;
 }
 
 async function saveCurrentShape() {
@@ -685,7 +758,13 @@ function startHealthMonitor() {
         healthCheckInFlight = true;
         try {
             const result = await bridgeCall("health");
-            if (result.ok || reconnecting) return result;
+            if (result.ok) {
+                if (result.recovered || (currentMode === MEDIA_MODE && !mediaRunning)) {
+                    await syncBoardState(currentSettings());
+                }
+                return result;
+            }
+            if (reconnecting) return result;
 
             reconnecting = true;
             renderConnectionStatus("connecting", "正在重新握手");
@@ -733,6 +812,8 @@ async function enterMaintenanceMode() {
     }
 
     maintenanceMode = true;
+    mediaRunning = false;
+    void refreshMediaStatus();
     if (healthTimer) {
         window.clearInterval(healthTimer);
         healthTimer = null;
@@ -781,6 +862,7 @@ async function restoreConnection() {
     }
 
     maintenanceMode = false;
+    await resumeMediaEffect();
     if (button) {
         button.disabled = false;
         button.textContent = "进入维护模式";
@@ -888,6 +970,8 @@ function bindEvents() {
 
     document.getElementById("sendMatrix").addEventListener("click", () => {
         currentMode = "自定义矩阵";
+        mediaRunning = false;
+        updateMediaVisibility();
         const settings = currentSettings();
         bridgeCall("send_matrix", matrixData, null, Math.round(settings.brightness * 255 / 100))
             .then(result => {
@@ -897,7 +981,10 @@ function bindEvents() {
     });
 
     function applyCurrentSettings() {
-        bridgeCall("apply", currentSettings());
+        updateMediaVisibility();
+        applyEffectSettings(currentSettings()).then(result => {
+            if (result.ok && currentMode === MEDIA_MODE) renderMediaStatus(result.media);
+        });
         schedulePersist();
     }
 
@@ -956,11 +1043,13 @@ function bindEvents() {
         modeButtons.forEach(item => item.classList.remove("active"));
         button.classList.add("active");
         currentMode = button.textContent.trim();
+        mediaRunning = false;
         updateRhythmControl(button.textContent.trim());
         applyCurrentSettings();
     }));
 
     window.addEventListener("beforeunload", () => {
+        if (mediaStatusTimer) window.clearInterval(mediaStatusTimer);
         flushPersistedState();
     });
 }
@@ -999,6 +1088,7 @@ async function startApplication() {
         if (!synced.ok && localState) applyUiState(localState);
     }
     startHealthMonitor();
+    mediaStatusTimer = window.setInterval(refreshMediaStatus, 1000);
     await loadShapes();
     await waitForRuntimeBackground();
     if (!connection.ok && !lastHeartbeatAt) setStatus(connection.error || "设备尚未连接", false);
