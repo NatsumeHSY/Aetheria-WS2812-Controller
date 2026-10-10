@@ -379,6 +379,8 @@ class JavaScriptBridge:
                 effect = getattr(self, "audio_effect", None)
                 if effect is not None and not effect.status().get("active"):
                     effect.activate(_settings_colors(state))
+            else:
+                self._stop_audio_effect()
             effect = getattr(self, "media_effect", None)
             if effect is not None and effect.status()["active"]:
                 state.update(mode=MEDIA_MODE, source="quick", colors=[])

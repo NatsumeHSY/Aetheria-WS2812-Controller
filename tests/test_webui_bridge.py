@@ -258,6 +258,20 @@ class WebUiBridgeTests(unittest.TestCase):
             bridge.disconnect()
             self.assertEqual(calls[-2:], [("audio_effect_stop",), ("disconnect",)])
 
+    def test_sync_audio_mode_reactivates_saved_board_audio_state(self):
+        snapshot = SyncSnapshot(5, 80, 180, 20, ((17, 34, 51),), None)
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+            bridge = self.make_bridge(MatrixShapeStore(Path(directory) / "shapes.json"))
+            bridge.controller = SyncBridgeController(snapshot=snapshot)
+            bridge.audio_effect = FakeAudioEffect(calls)
+
+            result = bridge.sync()
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["state"]["mode"], "音频响应")
+            self.assertEqual(calls, [("start_audio", ((17, 34, 51),))])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,7 +21,11 @@ let modalPreviousFocus = null;
 let mediaStatusTimer = null;
 let mediaStatusInFlight = false;
 let mediaRunning = false;
+let audioStatusTimer = null;
+let audioStatusInFlight = false;
+let audioRunning = false;
 const MEDIA_MODE = "媒体封面";
+const AUDIO_MODE = "音频响应";
 
 function renderPage() {
     document.querySelector("head").innerHTML = window.htmlHeadContent;
@@ -386,6 +390,8 @@ function applyUiState(state) {
         );
     });
     updateMediaVisibility();
+    updateAudioVisibility();
+    syncAudioStatusMonitor();
     if (Array.isArray(state.matrix144x6) && state.matrix144x6.length === ROWS) {
         matrixData = cloneMatrix(state.matrix144x6);
         renderMatrix();
@@ -430,6 +436,11 @@ function updateMediaVisibility() {
     if (panel) panel.hidden = currentMode !== MEDIA_MODE;
 }
 
+function updateAudioVisibility() {
+    const panel = document.getElementById("audioResponseStatus");
+    if (panel) panel.hidden = currentMode !== AUDIO_MODE;
+}
+
 function renderMediaStatus(media) {
     mediaRunning = media?.active === true && media?.suspended !== true;
     updateMediaVisibility();
@@ -455,6 +466,73 @@ async function refreshMediaStatus() {
     } finally {
         mediaStatusInFlight = false;
     }
+}
+
+function averageBands(bands, start, end) {
+    if (!Array.isArray(bands) || end <= start) return 0;
+    const values = bands.slice(start, end).map(value => Number(value) || 0);
+    return values.length ? Math.max(0, Math.min(255, Math.round(values.reduce((sum, value) => sum + value, 0) / values.length))) : 0;
+}
+
+function renderAudioStatus(audio) {
+    audioRunning = audio?.active === true;
+    updateAudioVisibility();
+    const bands = audio?.signal?.bands || [];
+    const values = {
+        low: averageBands(bands, 0, 2),
+        mid: averageBands(bands, 2, 6),
+        high: averageBands(bands, 6, 8),
+    };
+    const meters = {
+        low: document.getElementById("audioBandLow"),
+        mid: document.getElementById("audioBandMid"),
+        high: document.getElementById("audioBandHigh"),
+    };
+    Object.entries(meters).forEach(([name, meter]) => {
+        if (meter) meter.style.width = `${values[name] / 255 * 100}%`;
+    });
+    const label = document.getElementById("audioStatusLabel");
+    const detail = document.getElementById("audioCaptureDetail");
+    const age = document.getElementById("audioFrameAge");
+    const capture = audio?.capture || {};
+    if (label) label.textContent = audio?.error ? "音频响应异常" : (audioRunning ? "音频响应运行中" : "音频响应待机");
+    if (detail) {
+        detail.textContent = audio?.error
+            || (!capture.available ? "系统音频回环不可用" : (capture.running ? "已连接系统播放设备" : "等待音频捕获"));
+    }
+    const sendAge = audio?.send_age;
+    if (age) age.textContent = sendAge == null ? "尚无音频帧" : `最近帧 ${Math.max(0, Math.floor(sendAge * 1000))} ms 前`;
+}
+
+async function refreshAudioStatus() {
+    if (currentMode !== AUDIO_MODE || audioStatusInFlight) return;
+    audioStatusInFlight = true;
+    try {
+        const result = await bridgeApiCall("audio_status");
+        if (result.ok) renderAudioStatus(result.audio);
+        else renderAudioStatus({ active: false, error: result.error || "无法读取音频状态" });
+    } finally {
+        audioStatusInFlight = false;
+    }
+}
+
+function stopAudioStatusMonitor() {
+    if (audioStatusTimer) {
+        window.clearInterval(audioStatusTimer);
+        audioStatusTimer = null;
+    }
+}
+
+function startAudioStatusMonitor() {
+    stopAudioStatusMonitor();
+    if (currentMode !== AUDIO_MODE) return;
+    void refreshAudioStatus();
+    audioStatusTimer = window.setInterval(refreshAudioStatus, 500);
+}
+
+function syncAudioStatusMonitor() {
+    if (currentMode === AUDIO_MODE) startAudioStatusMonitor();
+    else stopAudioStatusMonitor();
 }
 
 function applyEffectSettings(settings) {
@@ -759,7 +837,7 @@ function startHealthMonitor() {
         try {
             const result = await bridgeCall("health");
             if (result.ok) {
-                if (result.recovered || (currentMode === MEDIA_MODE && !mediaRunning)) {
+                if (result.recovered || (currentMode === MEDIA_MODE && !mediaRunning) || (currentMode === AUDIO_MODE && !audioRunning)) {
                     await syncBoardState(currentSettings());
                 }
                 return result;
@@ -982,8 +1060,11 @@ function bindEvents() {
 
     function applyCurrentSettings() {
         updateMediaVisibility();
+        updateAudioVisibility();
+        syncAudioStatusMonitor();
         applyEffectSettings(currentSettings()).then(result => {
             if (result.ok && currentMode === MEDIA_MODE) renderMediaStatus(result.media);
+            if (result.ok && currentMode === AUDIO_MODE) renderAudioStatus(result.audio);
         });
         schedulePersist();
     }
@@ -1050,6 +1131,7 @@ function bindEvents() {
 
     window.addEventListener("beforeunload", () => {
         if (mediaStatusTimer) window.clearInterval(mediaStatusTimer);
+        stopAudioStatusMonitor();
         flushPersistedState();
     });
 }

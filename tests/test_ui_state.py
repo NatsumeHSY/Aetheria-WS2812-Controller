@@ -89,6 +89,16 @@ class UiStateTests(unittest.TestCase):
         self.assertEqual(normalized["matrix144x6"][5][143], "#000000")
         self.assertEqual(normalized["speed"], 200)
 
+    def test_audio_response_mode_round_trips_without_extra_board_fields(self):
+        state = valid_state()
+        state["mode"] = "音频响应"
+
+        normalized = normalize_ui_state(state)
+
+        self.assertEqual(normalized["mode"], "音频响应")
+        self.assertEqual(normalized["colors"], ["#112233", "#aabbcc"])
+        self.assertNotIn("audio", normalized)
+
 
 if __name__ == "__main__":
     unittest.main()

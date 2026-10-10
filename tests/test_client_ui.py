@@ -142,6 +142,24 @@ class ClientUiTests(unittest.TestCase):
         self.assertIn("fallback.colors", source)
         self.assertIn("fallback.paintColor", source)
 
+    def test_audio_response_mode_and_status_polling_are_dynamic_and_themed(self) -> None:
+        runtime = (ROOT / "client" / "webui" / "scripts" / "runtime_const.js").read_text(encoding="utf-8")
+        preview = (ROOT / "client" / "webui" / "templates" / "index.html").read_text(encoding="utf-8")
+        index = (ROOT / "client" / "webui" / "scripts" / "index.js").read_text(encoding="utf-8")
+
+        for source in (runtime, preview):
+            self.assertIn("音频响应", source)
+            self.assertIn('id="audioResponseStatus"', source)
+            self.assertIn('id="audioBandLow"', source)
+            self.assertIn('id="audioBandMid"', source)
+            self.assertIn('id="audioBandHigh"', source)
+
+        for symbol in ("renderAudioStatus", "startAudioStatusMonitor", "stopAudioStatusMonitor"):
+            self.assertIn(f"function {symbol}", index)
+        self.assertIn('bridgeApiCall("audio_status")', index)
+        self.assertIn("startAudioStatusMonitor", index)
+        self.assertIn("stopAudioStatusMonitor", index)
+
 
 if __name__ == "__main__":
     unittest.main()

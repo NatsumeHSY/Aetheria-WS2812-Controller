@@ -208,6 +208,15 @@ window.htmlHeadContent = `
   .media-color-copy { display: grid; min-width: 0; gap: 4px; }
   .media-color-label { color: var(--ink); font-size: 11px; }
   .media-color-detail { color: var(--ink-muted); font-size: 10px; overflow-wrap: anywhere; }
+  .audio-response-status { display: grid; gap: 10px; margin-top: 12px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-deep); }
+  .audio-response-status[hidden] { display: none; }
+  .audio-response-head, .audio-response-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .audio-response-label { color: var(--ink); font-size: 11px; }
+  .audio-response-detail, .audio-response-meta { color: var(--ink-muted); font-size: 10px; }
+  .audio-meter-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .audio-meter { display: grid; gap: 5px; color: var(--ink-muted); font-size: 9px; }
+  .audio-meter-track { height: 5px; overflow: hidden; background: rgba(141, 201, 188, 0.14); border-radius: 99px; }
+  .audio-meter-fill { width: 0; height: 100%; background: var(--teal); border-radius: inherit; transition: width 120ms ease; }
   .palette-list { display: grid; height: 184px; gap: 8px; align-content: start; overflow-y: scroll; padding: 8px 6px 8px 8px; border: 1px solid var(--line); border-radius: 12px; scrollbar-color: var(--teal) transparent; }
   .palette-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: center; }
   .palette-row.removable { grid-template-columns: minmax(0, 1fr) auto; }
@@ -293,8 +302,13 @@ window.htmlBodyContent = `
       </div>
       <div class="control-section"><div class="control-label"><span>亮度</span><span class="value-display" id="brightValue">72%</span></div><input id="brightness" type="range" min="0" max="100" value="72" /></div>
       <div class="control-section"><div class="control-label"><span>节奏</span><span class="value-display" id="speedValue">50</span></div><input id="speed" type="range" min="10" max="200" value="50" /></div>
-      <div class="control-section"><div class="control-label"><span>快捷效果</span><span class="value-display">4 effects</span></div><div class="mode-grid"><button class="mode-btn mode-button active" type="button">静态常亮</button><button class="mode-btn mode-button" type="button">呼吸渐变</button><button class="mode-btn mode-button" type="button">流光溢彩</button><button class="mode-btn mode-button" type="button">媒体封面</button></div>
+      <div class="control-section"><div class="control-label"><span>快捷效果</span><span class="value-display">5 effects</span></div><div class="mode-grid"><button class="mode-btn mode-button active" type="button">静态常亮</button><button class="mode-btn mode-button" type="button">呼吸渐变</button><button class="mode-btn mode-button" type="button">流光溢彩</button><button class="mode-btn mode-button" type="button">媒体封面</button><button class="mode-btn mode-button" type="button">音频响应</button></div>
         <div class="media-color-status" id="mediaColorStatus" aria-live="polite" hidden><span class="media-color-swatch" id="mediaColorSwatch" aria-hidden="true"></span><span class="media-color-copy"><span class="media-color-label" id="mediaColorLabel">使用默认快捷颜色</span><span class="media-color-detail" id="mediaColorDetail">暂无媒体播放 · 平滑回退</span></span></div>
+        <div class="audio-response-status" id="audioResponseStatus" aria-live="polite" hidden>
+          <div class="audio-response-head"><span class="audio-response-label" id="audioStatusLabel">音频响应待机</span><span class="value-display">实时频谱</span></div>
+          <div class="audio-meter-grid" aria-label="音频频段能量"><div class="audio-meter"><span>低频</span><div class="audio-meter-track"><div class="audio-meter-fill" id="audioBandLow"></div></div></div><div class="audio-meter"><span>中频</span><div class="audio-meter-track"><div class="audio-meter-fill" id="audioBandMid"></div></div></div><div class="audio-meter"><span>高频</span><div class="audio-meter-track"><div class="audio-meter-fill" id="audioBandHigh"></div></div></div></div>
+          <div class="audio-response-meta"><span id="audioCaptureDetail">等待音频捕获</span><span id="audioFrameAge">尚无音频帧</span></div>
+        </div>
       </div>
     </aside>
   </section>
