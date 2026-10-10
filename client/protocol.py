@@ -15,6 +15,10 @@ SYNC_COMMAND = b"\xF2"
 MAINTENANCE_COMMAND = b"\xF3"
 RESTART_COMMAND = b"\xF4"
 RESET_STATE_COMMAND = b"\xF5"
+AUDIO_COMMAND = b"\x0A"
+AUDIO_START_SUBTYPE = 0x00
+AUDIO_FRAME_SUBTYPE = 0x01
+AUDIO_STOP_SUBTYPE = 0x02
 PARAM_BRIGHTNESS_COMMAND = b"\xA0"
 PARAM_TIMING_COMMAND = b"\xA1"
 PARAM_WHITE_BALANCE_COMMAND = b"\xA2"
@@ -96,6 +100,39 @@ def build_restart_packet(sequence: int = 0) -> bytes:
 
 def build_reset_state_packet(sequence: int = 0) -> bytes:
     return build_packet(RESET_STATE_COMMAND[0], b"", sequence)
+
+
+def build_audio_start_packet(colors, sequence: int = 0) -> bytes:
+    colors = [tuple(color) for color in colors]
+    if not 1 <= len(colors) <= 8:
+        raise ValueError("audio start requires one to eight colors")
+    payload = bytearray([AUDIO_START_SUBTYPE, len(colors)])
+    for color in colors:
+        if len(color) != 3:
+            raise ValueError("each audio color must contain RGB")
+        payload.extend(_byte(channel, "audio color") for channel in color)
+    return build_packet(AUDIO_COMMAND[0], payload, sequence)
+
+
+def build_audio_frame_packet(frame_seq: int, bands, energy: int, beat: int) -> bytes:
+    frame_seq = int(frame_seq)
+    if not 0 <= frame_seq <= 0xFFFF:
+        raise ValueError("audio frame sequence must fit in two bytes")
+    bands = tuple(bands)
+    if len(bands) != 8:
+        raise ValueError("audio frame requires eight bands")
+    payload = bytearray([AUDIO_FRAME_SUBTYPE])
+    payload.extend(frame_seq.to_bytes(2, "big"))
+    payload.extend([
+        _byte(energy, "audio energy"),
+        _byte(beat, "audio beat"),
+    ])
+    payload.extend(_byte(value, "audio band") for value in bands)
+    return build_packet(AUDIO_COMMAND[0], payload, 0)
+
+
+def build_audio_stop_packet(sequence: int = 0) -> bytes:
+    return build_packet(AUDIO_COMMAND[0], bytes([AUDIO_STOP_SUBTYPE]), sequence)
 
 
 def build_brightness_packet(brightness: int, sequence: int = 0) -> bytes:

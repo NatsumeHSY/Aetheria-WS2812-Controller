@@ -11,6 +11,8 @@ try:
     from .protocol import (
         calculate_packet_crc,
         classify_sequence,
+        classify_audio_sequence,
+        decode_audio_frame_payload,
         next_sequence,
         restore_health_session,
         validate_packet,
@@ -20,6 +22,8 @@ except ImportError:
     from protocol import (
         calculate_packet_crc,
         classify_sequence,
+        classify_audio_sequence,
+        decode_audio_frame_payload,
         next_sequence,
         restore_health_session,
         validate_packet,
@@ -94,6 +98,8 @@ SOCKET: socket.socket = None
 CLIENT_ADDR: tuple[str, int] = None
 SOCKET_BUFFER: list[tuple[bytes, int, list]] = []
 EXPECTED_SEQ: int = None
+AUDIO_FRAME_SEQ: int = None
+AUDIO_FRAME_STATE: tuple[int, int, int, tuple[int, ...]] | None = None
 MAINTENANCE_MODE = False
 
 # state and persistence helpers are imported from sibling modules.
@@ -585,6 +591,26 @@ def led_show(length: int, payload: list) -> None:
     if copy_light_snapshot()["mode"] == 4:
         save_persisted_state()
 
+def led_audio_control(length: int, payload: list) -> None:
+    if not payload:
+        return
+    if payload[0] in (AUDIO_START_SUBTYPE, AUDIO_STOP_SUBTYPE):
+        return
+
+def accept_audio_frame(payload: list) -> bool:
+    global AUDIO_FRAME_SEQ, AUDIO_FRAME_STATE
+
+    try:
+        audio_seq, energy, beat, bands = decode_audio_frame_payload(payload)
+    except ValueError:
+        return False
+    status, _ = classify_audio_sequence(AUDIO_FRAME_SEQ, audio_seq)
+    if status != "accept":
+        return False
+    AUDIO_FRAME_SEQ = audio_seq
+    AUDIO_FRAME_STATE = (audio_seq, energy, beat, bands)
+    return True
+
 def exec_socket_buffer() -> None:
     effect_map = {
         b"\x00": led_clear,
@@ -597,6 +623,7 @@ def exec_socket_buffer() -> None:
         b"\x06": led_floor_tile_x,
         b"\x07": led_set_pixel,
         b"\x08": led_show,
+        AUDIO_COMMAND: led_audio_control,
         PARAM_BRIGHTNESS_COMMAND: led_set_global_brightness,
         PARAM_TIMING_COMMAND: led_set_global_timing,
         PARAM_WHITE_BALANCE_COMMAND: led_set_white_balance,
@@ -702,6 +729,11 @@ def loop() -> None:
 
             if cmd == RESET_STATE_COMMAND:
                 process_reset_state_command(addr, seq, payload)
+                continue
+
+            if cmd == AUDIO_COMMAND and payload and payload[0] == AUDIO_FRAME_SUBTYPE:
+                if addr == CLIENT_ADDR:
+                    accept_audio_frame(payload)
                 continue
 
             if addr != CLIENT_ADDR: continue
