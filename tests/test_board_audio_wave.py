@@ -140,6 +140,20 @@ class BoardAudioWaveTests(unittest.TestCase):
         finally:
             audio_wave._thread.start_new_thread = original_start
 
+    def test_effector_stop_with_clear_clears_driver(self):
+        driver = FakeDriver()
+        effector = self.audio_wave.AudioWaveEffector(driver)
+        original_start = self.audio_wave._thread.start_new_thread
+        self.audio_wave._thread.start_new_thread = lambda target, args: 1
+        try:
+            effector.start(self.audio_wave.AudioWaveConfig([(1, 2, 3)]))
+            effector.stop(clear=True)
+        finally:
+            self.audio_wave._thread.start_new_thread = original_start
+
+        self.assertFalse(effector.active)
+        self.assertGreaterEqual(driver.clears, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

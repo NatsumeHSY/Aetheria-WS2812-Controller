@@ -101,34 +101,40 @@ class AudioCaptureWorker:
         self._last_frame_at: float | None = None
 
     def start(self) -> None:
+        start_error = None
         with self._lock:
             if self._running:
                 return
             try:
                 self.backend.start()
             except Exception as exc:
-                self._set_error(exc)
-                return
-            self._stop_event.clear()
-            self._error = None
-            self._running = True
-            self._reader_thread = threading.Thread(target=self._read_loop, name="audio-capture", daemon=True)
-            self._analyzer_thread = threading.Thread(target=self._analyze_loop, name="audio-spectrum", daemon=True)
-            self._reader_thread.start()
-            self._analyzer_thread.start()
-            self._publish_status()
+                start_error = exc
+            else:
+                self._stop_event.clear()
+                self._error = None
+                self._running = True
+                self._reader_thread = threading.Thread(target=self._read_loop, name="audio-capture", daemon=True)
+                self._analyzer_thread = threading.Thread(target=self._analyze_loop, name="audio-spectrum", daemon=True)
+                self._reader_thread.start()
+                self._analyzer_thread.start()
+        if start_error is not None:
+            self._set_error(start_error)
+            return
+        self._publish_status()
 
     def stop(self, timeout: float = 1.0) -> None:
         with self._lock:
             if not self._running and self._reader_thread is None and self._analyzer_thread is None:
                 return
             self._stop_event.set()
-            try:
-                self.backend.stop()
-            except Exception as exc:
-                self._error = str(exc)
-            self._enqueue(None)
             reader, analyzer = self._reader_thread, self._analyzer_thread
+
+        try:
+            self.backend.stop()
+        except Exception as exc:
+            with self._lock:
+                self._error = str(exc)
+        self._enqueue(None)
 
         deadline = time.monotonic() + max(0.0, float(timeout))
         for thread in (reader, analyzer):
@@ -139,7 +145,7 @@ class AudioCaptureWorker:
             self._running = False
             self._reader_thread = None
             self._analyzer_thread = None
-            self._publish_status()
+        self._publish_status()
 
     def status(self) -> dict:
         with self._lock:
@@ -210,7 +216,13 @@ class AudioCaptureWorker:
             self._error = str(exc)
             self._stop_event.set()
             self._running = False
-            self._publish_status()
+        try:
+            self.backend.stop()
+        except Exception as stop_error:
+            with self._lock:
+                self._error = f"{self._error}; stop failed: {stop_error}"
+        self._enqueue(None)
+        self._publish_status()
 
     def _publish_status(self) -> None:
         if self.on_status is not None:

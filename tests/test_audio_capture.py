@@ -93,6 +93,7 @@ class AudioCaptureWorkerTests(unittest.TestCase):
 
         self.assertIn("loopback unavailable", status["error"])
         self.assertFalse(status["running"])
+        self.assertGreaterEqual(worker.backend.stopped, 1)
 
     def test_bounded_queue_drops_stale_blocks(self):
         backend = FakeBackend([np.ones(8, dtype=np.float32) for _ in range(12)])

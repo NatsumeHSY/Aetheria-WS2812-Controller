@@ -149,18 +149,6 @@ class JavaScriptBridge:
         if effect is not None:
             effect.stop()
 
-    def _restore_saved_audio(self) -> None:
-        effect = getattr(self, "audio_effect", None)
-        if effect is None or effect.status().get("active"):
-            return
-        state = self.ui_state_store.load()
-        if state is None or state.get("mode") != AUDIO_MODE:
-            return
-        try:
-            effect.activate(_settings_colors(state))
-        except (ControllerError, OSError, ValueError, RuntimeError) as error:
-            return {"error": str(error)}
-
     def media_status(self) -> dict:
         effect = getattr(self, "media_effect", None)
         return {
@@ -198,8 +186,6 @@ class JavaScriptBridge:
             if effect is not None:
                 effect.suspend()
             connected = self.controller.connect()
-            if connected:
-                self._restore_saved_audio()
             return {
                 "ok": connected,
                 "connected": connected,
@@ -245,8 +231,6 @@ class JavaScriptBridge:
                 effect.suspend()
             if not connected:
                 self._stop_audio_effect()
-            elif connected and not was_connected:
-                self._restore_saved_audio()
             result = {"ok": connected, "connected": connected}
             if connected and not was_connected:
                 result["recovered"] = True
@@ -375,8 +359,22 @@ class JavaScriptBridge:
                 return {"ok": False, "connected": False, "error": "无法同步：设备未连接"}
             snapshot = self.controller.sync()
             state = self._snapshot_to_ui_state(snapshot)
-            if state.get("mode") == AUDIO_MODE:
-                effect = getattr(self, "audio_effect", None)
+            effect = getattr(self, "audio_effect", None)
+            state_store = getattr(self, "ui_state_store", None)
+            saved_state = state_store.load() if state_store is not None else None
+            saved_audio = saved_state if saved_state and saved_state.get("mode") == AUDIO_MODE else None
+            if saved_audio is not None:
+                if effect is not None and not effect.status().get("active"):
+                    effect.activate(_settings_colors(saved_audio))
+                state.update({
+                    "source": "quick",
+                    "mode": AUDIO_MODE,
+                    "brightness": saved_audio["brightness"],
+                    "speed": saved_audio["speed"],
+                    "colors": list(saved_audio["colors"]),
+                    "paintColor": saved_audio["paintColor"],
+                })
+            elif state.get("mode") == AUDIO_MODE:
                 if effect is not None and not effect.status().get("active"):
                     effect.activate(_settings_colors(state))
             else:

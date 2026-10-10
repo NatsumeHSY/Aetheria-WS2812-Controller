@@ -74,6 +74,8 @@ def normalize_ui_state(state: dict) -> dict:
     colors = state.get("colors")
     if not isinstance(colors, list) or not 1 <= len(colors) <= MAX_COLORS:
         raise ValueError("UI color list must contain between 1 and 64 colors")
+    if mode == "音频响应" and len(colors) > 8:
+        raise ValueError("audio response supports at most eight colors")
 
     return {
         "version": UI_STATE_VERSION,

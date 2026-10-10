@@ -48,7 +48,6 @@ try:
         set_global_timing,
         set_global_white_balance,
         update_breathe_snapshot,
-        update_audio_snapshot,
         update_fill_snapshot,
         update_matrix_pixels,
         update_matrix_snapshot,
@@ -80,7 +79,6 @@ except ImportError:
         set_global_timing,
         set_global_white_balance,
         update_breathe_snapshot,
-        update_audio_snapshot,
         update_fill_snapshot,
         update_matrix_pixels,
         update_matrix_snapshot,
@@ -103,12 +101,15 @@ CLIENT_ADDR: tuple[str, int] = None
 SOCKET_BUFFER: list[tuple[bytes, int, list]] = []
 EXPECTED_SEQ: int = None
 AUDIO_FRAME_SEQ: int = None
-AUDIO_FRAME_STATE: tuple[int, int, int, tuple[int, ...]] | None = None
+AUDIO_COLORS: tuple[tuple[int, int, int], ...] = ()
 MAINTENANCE_MODE = False
 
 # state and persistence helpers are imported from sibling modules.
 
 def redraw_static_snapshot() -> None:
+    audio_wave = getattr(getattr(globals().get("EFFECTOR"), "audio_wave", None), "active", False)
+    if audio_wave:
+        return
     snapshot = copy_light_snapshot()
     brightness = get_global_brightness()
 
@@ -238,6 +239,20 @@ def build_sync_response(expected_seq: int) -> bytes:
     snapshot = copy_light_snapshot()
     colors = snapshot["colors"]
     mode = snapshot["mode"]
+    brightness_min = snapshot["brightness_min"]
+    brightness_max = snapshot["brightness_max"]
+    timing = snapshot["timing"]
+    matrix = snapshot["matrix"]
+
+    audio_effect = getattr(globals().get("EFFECTOR"), "audio_wave", None)
+    if getattr(audio_effect, "active", False):
+        mode = 5
+        colors = [list(color) for color in globals().get("AUDIO_COLORS", ())]
+        brightness_min = get_global_brightness()
+        brightness_max = brightness_min
+        timing = get_global_timing(timing)
+        matrix = None
+
     if len(colors) > 32:
         mode = 0xFF
         colors = []
@@ -245,16 +260,15 @@ def build_sync_response(expected_seq: int) -> bytes:
     payload = bytearray([
         SYNC_VERSION,
         mode,
-        snapshot["brightness_min"],
-        snapshot["brightness_max"],
+        brightness_min,
+        brightness_max,
     ])
-    payload.extend(int(snapshot["timing"]).to_bytes(2, "big"))
+    payload.extend(int(timing).to_bytes(2, "big"))
     payload.extend(get_global_white_balance())
     payload.append(len(colors))
     for color in colors:
         payload.extend(color)
 
-    matrix = snapshot["matrix"]
     payload.append(1 if matrix is not None else 0)
     if matrix is not None:
         for row in matrix:
@@ -599,7 +613,7 @@ def led_audio_control(length: int, payload: list) -> None:
     if not payload:
         return
 
-    global AUDIO_FRAME_SEQ, AUDIO_FRAME_STATE
+    global AUDIO_FRAME_SEQ, AUDIO_COLORS
     subtype = payload[0]
     if subtype == AUDIO_START_SUBTYPE:
         if length < 2:
@@ -609,19 +623,18 @@ def led_audio_control(length: int, payload: list) -> None:
             return
         colors = [tuple(payload[index:index + 3]) for index in range(2, length, 3)]
         AUDIO_FRAME_SEQ = None
-        AUDIO_FRAME_STATE = None
+        AUDIO_COLORS = tuple(colors)
         config = AudioWaveConfig(colors, timing_ms=get_global_timing(25))
-        update_audio_snapshot(colors, config.timing_ms)
         EFFECTOR.start_audio(config)
         return
 
     if subtype == AUDIO_STOP_SUBTYPE and length == 1:
         AUDIO_FRAME_SEQ = None
-        AUDIO_FRAME_STATE = None
-        EFFECTOR.stop_audio(clear=False)
+        AUDIO_COLORS = ()
+        EFFECTOR.stop_audio(clear=True)
 
 def accept_audio_frame(payload: list) -> bool:
-    global AUDIO_FRAME_SEQ, AUDIO_FRAME_STATE
+    global AUDIO_FRAME_SEQ
 
     try:
         audio_seq, energy, beat, bands = decode_audio_frame_payload(payload)
@@ -631,9 +644,8 @@ def accept_audio_frame(payload: list) -> bool:
     if status != "accept":
         return False
     AUDIO_FRAME_SEQ = audio_seq
-    AUDIO_FRAME_STATE = (audio_seq, energy, beat, bands)
     if EFFECTOR is not None:
-        EFFECTOR.update_audio(AUDIO_FRAME_STATE)
+        EFFECTOR.update_audio((audio_seq, energy, beat, bands))
     return True
 
 def exec_socket_buffer() -> None:
@@ -711,16 +723,18 @@ def loop() -> None:
 
             length = len(payload)
 
-            print(
-                f"[INFO] Received data from {addr[0]}:{addr[1]}:",
-                data[:20],
-                "..." if len(data) > 20 else "",
-                "\n\tMagic:",
-                data[:2],
-                "Command:",
-                cmd, 
-                f"Length: {length}, Seq: {seq}\n\tPayload: {payload[:20]}{'...' if len(payload) > 20 else ''}"
-            )
+            is_audio_frame = cmd == AUDIO_COMMAND and payload and payload[0] == AUDIO_FRAME_SUBTYPE
+            if not is_audio_frame:
+                print(
+                    f"[INFO] Received data from {addr[0]}:{addr[1]}:",
+                    data[:20],
+                    "..." if len(data) > 20 else "",
+                    "\n\tMagic:",
+                    data[:2],
+                    "Command:",
+                    cmd,
+                    f"Length: {length}, Seq: {seq}\n\tPayload: {payload[:20]}{'...' if len(payload) > 20 else ''}"
+                )
 
             if cmd == HEALTH_COMMAND:
                 accepted, restored_addr, expected_seq = restore_health_session(

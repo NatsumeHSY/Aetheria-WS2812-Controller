@@ -99,6 +99,14 @@ class UiStateTests(unittest.TestCase):
         self.assertEqual(normalized["colors"], ["#112233", "#aabbcc"])
         self.assertNotIn("audio", normalized)
 
+    def test_audio_response_mode_rejects_more_than_eight_colors(self):
+        state = valid_state()
+        state["mode"] = "音频响应"
+        state["colors"] = [f"#{index:06x}" for index in range(9)]
+
+        with self.assertRaises(ValueError):
+            normalize_ui_state(state)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -96,6 +96,7 @@ class LEDController:
         self._socket = sock
         self._owns_socket = sock is None
         self._lock = threading.RLock()
+        self._audio_lock = threading.Lock()
         self._sequence = 0
         self._history: dict[int, bytes] = {}
         self.connected = False
@@ -104,6 +105,13 @@ class LEDController:
     @property
     def sequence(self) -> int:
         return self._sequence
+
+    def _audio_transport_lock(self) -> threading.Lock:
+        lock = getattr(self, "_audio_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._audio_lock = lock
+        return lock
 
     def _ensure_socket(self) -> socket.socket:
         if self._socket is None:
@@ -191,9 +199,10 @@ class LEDController:
         with self._lock:
             self.connected = False
             self._history.clear()
-            if self._owns_socket and self._socket is not None:
-                self._socket.close()
-                self._socket = None
+            with self._audio_transport_lock():
+                if self._owns_socket and self._socket is not None:
+                    self._socket.close()
+                    self._socket = None
 
     def _send_packet(self, command: int, payload: bytes | bytearray | list[int]) -> int:
         with self._lock:
@@ -363,7 +372,7 @@ class LEDController:
         else:
             frame_seq, bands, energy, beat = frame
         packet = build_audio_frame_packet(frame_seq, bands, energy, beat)
-        with self._lock:
+        with self._audio_transport_lock():
             if not self.connected:
                 raise ControllerError("controller is not connected")
             self._ensure_socket().sendto(packet, (self.host, self.port))
@@ -378,17 +387,19 @@ class LEDController:
         if lock is None:
             self.connected = False
             self._history.clear()
-            if self._owns_socket and self._socket is not None:
-                self._socket.close()
-                self._socket = None
+            with self._audio_transport_lock():
+                if self._owns_socket and self._socket is not None:
+                    self._socket.close()
+                    self._socket = None
             return sequence
 
         with lock:
             self.connected = False
             self._history.clear()
-            if self._owns_socket and self._socket is not None:
-                self._socket.close()
-                self._socket = None
+            with self._audio_transport_lock():
+                if self._owns_socket and self._socket is not None:
+                    self._socket.close()
+                    self._socket = None
         return sequence
 
     def set_brightness(self, brightness: int) -> int:

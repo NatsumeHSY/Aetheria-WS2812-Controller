@@ -540,6 +540,11 @@ function applyEffectSettings(settings) {
         setStatus("维护模式下请先恢复连接", false);
         return Promise.resolve({ ok: false, maintenance: true });
     }
+    if (settings.mode === AUDIO_MODE && (!Array.isArray(settings.colors) || settings.colors.length > 8)) {
+        const error = "音频响应最多使用 8 种颜色";
+        setStatus(error, null);
+        return Promise.resolve({ ok: false, connected: true, error });
+    }
     if (settings.mode !== MEDIA_MODE) return bridgeCall("apply", settings);
     // Starting the client worker is not a board ACK. Do not refresh the
     // device heartbeat until an actual health/command response arrives.

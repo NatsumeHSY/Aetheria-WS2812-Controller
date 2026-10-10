@@ -272,6 +272,32 @@ class WebUiBridgeTests(unittest.TestCase):
             self.assertEqual(result["state"]["mode"], "音频响应")
             self.assertEqual(calls, [("start_audio", ((17, 34, 51),))])
 
+    def test_sync_restores_saved_client_audio_mode_after_non_audio_board_snapshot(self):
+        snapshot = SyncSnapshot(1, 80, 180, 20, ((1, 2, 3),), None)
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+            bridge = self.make_bridge(MatrixShapeStore(Path(directory) / "shapes.json"))
+            bridge.controller = SyncBridgeController(snapshot=snapshot)
+            bridge.audio_effect = FakeAudioEffect(calls)
+            bridge.ui_state_store.save({
+                "version": 1,
+                "source": "quick",
+                "mode": "音频响应",
+                "brightness": 61,
+                "speed": 90,
+                "colors": ["#112233", "#445566"],
+                "paintColor": "#8dc9bc",
+                "whiteBalance": [255, 190, 110],
+                "matrix144x6": lit_matrix(),
+            })
+
+            result = bridge.sync()
+
+            self.assertEqual(result["state"]["mode"], "音频响应")
+            self.assertEqual(result["state"]["colors"], ["#112233", "#445566"])
+            self.assertEqual(result["state"]["brightness"], 61)
+            self.assertEqual(calls, [("start_audio", ((17, 34, 51), (68, 85, 102)))])
+
 
 if __name__ == "__main__":
     unittest.main()

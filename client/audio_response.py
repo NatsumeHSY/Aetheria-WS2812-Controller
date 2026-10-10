@@ -47,6 +47,11 @@ class AudioResponseEffect:
         self._capture_status: dict = {}
         self._error = ""
         self._closed = False
+        self._frame_event = threading.Event()
+        self._sender_thread: threading.Thread | None = None
+        self._pending_frame: AudioFrame | None = None
+        self._generation = 0
+        self._board_active = False
 
     def activate(self, colors: Sequence[Sequence[int]]) -> dict:
         normalized = tuple(_color(color) for color in colors)
@@ -56,7 +61,8 @@ class AudioResponseEffect:
             if self._closed:
                 raise RuntimeError("audio response effect is closed")
             was_active = self._active
-        if was_active:
+            was_board_active = self._board_active
+        if was_active or was_board_active:
             self.stop()
 
         # The board must enter audio mode successfully before capture starts.
@@ -67,16 +73,25 @@ class AudioResponseEffect:
             self._last_sent_at = None
             self._error = ""
             self._active = True
+            self._board_active = True
+            self._pending_frame = None
+            self._generation += 1
+            generation = self._generation
+            self._frame_event.clear()
+            self._sender_thread = threading.Thread(
+                target=self._send_loop,
+                args=(generation,),
+                name="audio-response-sender",
+                daemon=True,
+            )
+            sender = self._sender_thread
+        sender.start()
         try:
             self._capture.start()
         except Exception as error:
             with self.lock:
                 self._error = str(error)
-            try:
-                self.controller.stop_audio()
-            finally:
-                with self.lock:
-                    self._active = False
+            self.stop()
             raise
         with self.lock:
             self._capture_status = dict(self._capture.status())
@@ -85,21 +100,31 @@ class AudioResponseEffect:
     def stop(self) -> None:
         with self.lock:
             active = self._active
+            board_active = self._board_active
             self._active = False
-        if not active:
+            self._board_active = False
+            self._generation += 1
+            self._pending_frame = None
+            sender = self._sender_thread
+            self._sender_thread = None
+            self._frame_event.set()
+        if not active and not board_active and sender is None:
             return
 
         # AudioCaptureWorker.stop joins its reader/analyzer threads before the
         # reliable board stop command, preventing late frames from crossing a
         # mode boundary.
         self._capture.stop()
+        if sender is not None and sender is not threading.current_thread():
+            sender.join(timeout=1.0)
         with self.lock:
             self._capture_status = dict(self._capture.status())
-        try:
-            self.controller.stop_audio()
-        except Exception as error:
-            with self.lock:
-                self._error = str(error)
+        if board_active:
+            try:
+                self.controller.stop_audio()
+            except Exception as error:
+                with self.lock:
+                    self._error = str(error)
 
     def close(self) -> None:
         with self.lock:
@@ -118,9 +143,10 @@ class AudioResponseEffect:
             last_sent_at = self._last_sent_at
             error = self._error or str(capture_status.get("error") or "")
             active = self._active
+            colors = self._colors
         return {
             "active": active,
-            "colors": [list(color) for color in self._colors],
+            "colors": [list(color) for color in colors],
             "capture": capture_status,
             "signal": {
                 "bands": list(last_frame.bands) if last_frame is not None else [0] * 8,
@@ -135,18 +161,40 @@ class AudioResponseEffect:
         with self.lock:
             if not self._active:
                 return
-        try:
-            self.controller.send_audio_frame(frame)
-        except Exception as error:
-            with self.lock:
-                self._error = str(error)
-            return
-        with self.lock:
             self._last_frame = frame
-            self._last_sent_at = time.monotonic()
+            self._pending_frame = frame
+            self._frame_event.set()
+
+    def _send_loop(self, generation: int) -> None:
+        while True:
+            self._frame_event.wait(0.1)
+            with self.lock:
+                if generation != self._generation:
+                    return
+                frame = self._pending_frame
+                self._pending_frame = None
+                self._frame_event.clear()
+                active = self._active
+            if frame is None:
+                if not active:
+                    return
+                continue
+            try:
+                self.controller.send_audio_frame(frame)
+            except Exception as error:
+                with self.lock:
+                    if generation == self._generation:
+                        self._error = str(error)
+                self.stop()
+                return
+            with self.lock:
+                if generation == self._generation:
+                    self._last_sent_at = time.monotonic()
 
     def _on_capture_status(self, status: dict) -> None:
         with self.lock:
             self._capture_status = dict(status)
             if status.get("error"):
                 self._error = str(status["error"])
+                self._active = False
+                self._frame_event.set()

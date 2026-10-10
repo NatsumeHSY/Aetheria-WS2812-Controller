@@ -116,7 +116,6 @@ class Effector:
         return self.audio_wave.update(frame)
 
     def stop_audio(self, clear: bool = False) -> None:
-        self.audio_wave.stop(clear=clear)
         self.stop(clear=clear)
     
     def fade(self, color: tuple[int, int, int] = COLOR_WHITE, start_brightness: int = 0,end_brightness: int = 255) -> None:

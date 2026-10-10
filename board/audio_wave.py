@@ -12,6 +12,7 @@ except ImportError:
 DEFAULT_CENTERS = ((18, 1), (48, 4), (72, 2), (96, 4), (126, 1))
 DEFAULT_TIMING_MS = 25
 AUDIO_TIMEOUT_MS = 200
+RENDER_INTERVAL_MS = 5
 RING_WIDTH = 4
 MAX_RADIUS = 180
 
@@ -120,7 +121,7 @@ class AudioWaveState:
         try:
             if not self._active or self._last_update_ms is None:
                 return True
-            return _elapsed_ms(now_ms, self._last_update_ms) > max(0, int(timeout_ms))
+            return _elapsed_ms(now_ms, self._last_update_ms) >= max(0, int(timeout_ms))
         finally:
             self._lock.release()
 
@@ -194,11 +195,12 @@ class AudioWaveState:
 
 
 class AudioWaveEffector:
-    def __init__(self, driver, frame_interval_ms: int = DEFAULT_TIMING_MS, clock=None):
+    def __init__(self, driver, frame_interval_ms: int = RENDER_INTERVAL_MS, clock=None):
         self.driver = driver
         self.frame_interval_ms = max(5, int(frame_interval_ms))
         self._clock = clock or _now_ms
         self._lock = _thread.allocate_lock()
+        self._render_lock = _thread.allocate_lock()
         self._state = None
         self._config = None
         self._generation = 0
@@ -242,8 +244,13 @@ class AudioWaveEffector:
         return state.update(*values)
 
     def stop(self, clear: bool = False) -> None:
+        self._stop_generation(None, clear)
+
+    def _stop_generation(self, generation: int | None, clear: bool) -> bool:
         self._lock.acquire()
         try:
+            if generation is not None and (not self._running or generation != self._generation):
+                return False
             self._generation += 1
             self._running = False
             state = self._state
@@ -251,10 +258,15 @@ class AudioWaveEffector:
             self._config = None
         finally:
             self._lock.release()
-        if state is not None:
-            state.stop()
-        if clear:
-            self.driver.clear()
+        self._render_lock.acquire()
+        try:
+            if state is not None:
+                state.stop()
+            if clear:
+                self.driver.clear()
+        finally:
+            self._render_lock.release()
+        return True
 
     def _render_loop(self, generation: int, state: AudioWaveState) -> None:
         while True:
@@ -268,11 +280,22 @@ class AudioWaveEffector:
                 return
             now = self._clock()
             if state.expired(now):
-                self.stop(clear=False)
+                self._stop_generation(generation, clear=True)
                 return
-            state.render_frame(
-                self.driver,
-                get_global_brightness(),
-                get_global_timing(config.timing_ms),
-            )
+            self._render_lock.acquire()
+            try:
+                self._lock.acquire()
+                try:
+                    still_active = self._running and generation == self._generation
+                finally:
+                    self._lock.release()
+                if not still_active:
+                    return
+                state.render_frame(
+                    self.driver,
+                    get_global_brightness(),
+                    get_global_timing(config.timing_ms),
+                )
+            finally:
+                self._render_lock.release()
             time.sleep_ms(self.frame_interval_ms)

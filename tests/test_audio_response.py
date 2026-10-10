@@ -1,4 +1,6 @@
 import socket
+import threading
+import time
 import unittest
 
 from client.audio_response import AudioResponseEffect
@@ -53,12 +55,15 @@ class FakeAudioController:
     def __init__(self, log):
         self.log = log
         self.connected = True
+        self.send_error = None
 
     def start_audio(self, colors):
         self.log.append(("start_audio", colors))
         return 3
 
     def send_audio_frame(self, frame):
+        if self.send_error is not None:
+            raise self.send_error
         self.log.append(("send_audio_frame", frame.frame_seq))
 
     def stop_audio(self):
@@ -100,6 +105,22 @@ class ControllerAudioResponseTests(unittest.TestCase):
         self.assertEqual((command, sequence), (AUDIO_COMMAND, 0))
         self.assertEqual(payload[0], AUDIO_FRAME_SUBTYPE)
 
+    def test_audio_frame_send_does_not_wait_for_reliable_command_lock(self):
+        sock = FakeSocket()
+        controller = LEDController(sock=sock, retries=1)
+        controller.connected = True
+        finished = threading.Event()
+        controller._lock.acquire()
+        try:
+            thread = threading.Thread(
+                target=lambda: (controller.send_audio_frame(AudioFrame(1, (1,) * 8, 1, 0)), finished.set()),
+                daemon=True,
+            )
+            thread.start()
+            self.assertTrue(finished.wait(0.5))
+        finally:
+            controller._lock.release()
+
     def test_newest_audio_frame_is_the_last_frame_sent(self):
         sock = FakeSocket()
         controller = LEDController(sock=sock, retries=1)
@@ -136,11 +157,31 @@ class AudioResponseEffectTests(unittest.TestCase):
         effect._on_frame(frame)
         status = effect.status()
 
+        deadline = time.monotonic() + 1
+        while ("send_audio_frame", 5) not in log and time.monotonic() < deadline:
+            time.sleep(0.01)
         self.assertIn(("send_audio_frame", 5), log)
         self.assertEqual(status["signal"]["energy"], 100)
         self.assertEqual(status["signal"]["beat"], 25)
         self.assertEqual(status["error"], "")
         effect.stop()
+
+    def test_frame_send_failure_stops_capture_and_board_audio(self):
+        log = []
+        controller = FakeAudioController(log)
+        controller.send_error = OSError("socket closed")
+        capture = FakeCapture(log)
+        effect = AudioResponseEffect(controller, capture=capture)
+        effect.activate([(1, 2, 3)])
+
+        effect._on_frame(AudioFrame(1, (1,) * 8, 10, 0))
+        deadline = time.monotonic() + 1
+        while effect.status()["active"] and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        self.assertFalse(effect.status()["active"])
+        self.assertIn("socket closed", effect.status()["error"])
+        self.assertEqual(log[-2:], ["capture_stop", "stop_audio"])
 
 
 if __name__ == "__main__":

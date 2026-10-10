@@ -176,11 +176,6 @@ def update_rainbow_snapshot(brightness: int, timing: int, start_x: int = 0,
         SNAPSHOT_LOCK.release()
 
 
-def update_audio_snapshot(colors: list[tuple[int, int, int]], timing: int) -> None:
-    brightness = get_global_brightness()
-    _snapshot_write(5, brightness, brightness, timing, colors, None)
-
-
 def update_matrix_snapshot(matrix: list[list[list[int]]], brightness: int) -> None:
     if len(matrix) != LED_LINE or any(len(row) != LED_DOT_PER_LINE for row in matrix):
         raise ValueError("matrix dimensions must be 6x144")
