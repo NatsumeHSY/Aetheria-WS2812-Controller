@@ -4,10 +4,12 @@ import time
 
 try:
     from .config import *
+    from .audio_wave import AudioWaveConfig, AudioWaveEffector
     from .led_driver import LedDriver
     from .state import get_global_brightness, get_global_timing
 except ImportError:
     from config import *
+    from audio_wave import AudioWaveConfig, AudioWaveEffector
     from led_driver import LedDriver
     from state import get_global_brightness, get_global_timing
 
@@ -52,6 +54,7 @@ class Effector:
         self.interrupt_flag = True
         self._effect_generation = 0
         self._effect_lock = _thread.allocate_lock()
+        self.audio_wave = AudioWaveEffector(driver)
 
     def _start_effect(self, clear: bool = True) -> int:
         self.stop(clear=clear)
@@ -103,6 +106,18 @@ class Effector:
                 self.driver.clear()
         finally:
             self._effect_lock.release()
+        self.audio_wave.stop(clear=False)
+
+    def start_audio(self, config: AudioWaveConfig) -> None:
+        self._start_effect(clear=False)
+        self.audio_wave.start(config)
+
+    def update_audio(self, frame) -> bool:
+        return self.audio_wave.update(frame)
+
+    def stop_audio(self, clear: bool = False) -> None:
+        self.audio_wave.stop(clear=clear)
+        self.stop(clear=clear)
     
     def fade(self, color: tuple[int, int, int] = COLOR_WHITE, start_brightness: int = 0,end_brightness: int = 255) -> None:
         generation = self._start_effect()

@@ -48,6 +48,7 @@ try:
         set_global_timing,
         set_global_white_balance,
         update_breathe_snapshot,
+        update_audio_snapshot,
         update_fill_snapshot,
         update_matrix_pixels,
         update_matrix_snapshot,
@@ -60,6 +61,7 @@ try:
     )
     from .led_driver import LedDriver
     from .effects import Effector, interpolate_color_state, rainbow_color, xy2pos
+    from .audio_wave import AudioWaveConfig
 except ImportError:
     from state import (
         LIGHT_EFFECT_PARAMS,
@@ -78,6 +80,7 @@ except ImportError:
         set_global_timing,
         set_global_white_balance,
         update_breathe_snapshot,
+        update_audio_snapshot,
         update_fill_snapshot,
         update_matrix_pixels,
         update_matrix_snapshot,
@@ -90,6 +93,7 @@ except ImportError:
     )
     from led_driver import LedDriver
     from effects import Effector, interpolate_color_state, rainbow_color, xy2pos
+    from audio_wave import AudioWaveConfig
 
 # initialize application globals
 DRIVER: LedDriver = None
@@ -594,8 +598,27 @@ def led_show(length: int, payload: list) -> None:
 def led_audio_control(length: int, payload: list) -> None:
     if not payload:
         return
-    if payload[0] in (AUDIO_START_SUBTYPE, AUDIO_STOP_SUBTYPE):
+
+    global AUDIO_FRAME_SEQ, AUDIO_FRAME_STATE
+    subtype = payload[0]
+    if subtype == AUDIO_START_SUBTYPE:
+        if length < 2:
+            return
+        color_count = payload[1]
+        if not 1 <= color_count <= 8 or length != 2 + color_count * 3:
+            return
+        colors = [tuple(payload[index:index + 3]) for index in range(2, length, 3)]
+        AUDIO_FRAME_SEQ = None
+        AUDIO_FRAME_STATE = None
+        config = AudioWaveConfig(colors, timing_ms=get_global_timing(25))
+        update_audio_snapshot(colors, config.timing_ms)
+        EFFECTOR.start_audio(config)
         return
+
+    if subtype == AUDIO_STOP_SUBTYPE and length == 1:
+        AUDIO_FRAME_SEQ = None
+        AUDIO_FRAME_STATE = None
+        EFFECTOR.stop_audio(clear=False)
 
 def accept_audio_frame(payload: list) -> bool:
     global AUDIO_FRAME_SEQ, AUDIO_FRAME_STATE
@@ -609,6 +632,8 @@ def accept_audio_frame(payload: list) -> bool:
         return False
     AUDIO_FRAME_SEQ = audio_seq
     AUDIO_FRAME_STATE = (audio_seq, energy, beat, bands)
+    if EFFECTOR is not None:
+        EFFECTOR.update_audio(AUDIO_FRAME_STATE)
     return True
 
 def exec_socket_buffer() -> None:
