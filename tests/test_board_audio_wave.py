@@ -133,6 +133,28 @@ class BoardAudioWaveTests(unittest.TestCase):
         self.assertTrue(any(write[2] < 200 for write in driver.writes))
         self.assertTrue(all(write[1] == (10, 20, 30) for write in driver.writes))
 
+    def test_audio_drop_starts_as_a_dark_breath_and_propagates_outward(self):
+        state = self.audio_wave.AudioWaveState(
+            self.audio_wave.AudioWaveConfig([(10, 20, 30)]),
+            clock=FakeClock(100),
+        )
+        state.update(1, 0, 0, (255, 255, 0, 0, 0, 0, 0, 0))
+
+        first = FakeDriver()
+        state.render_frame(first, brightness=255, timing_ms=25)
+        first_center = next(write[2] for write in first.writes if write[0] == 1 * 144 + (144 - 1 - 18))
+        first_outer = next(write[2] for write in first.writes if write[0] == 1 * 144 + (144 - 1 - 26))
+
+        second = FakeDriver()
+        state.render_frame(second, brightness=255, timing_ms=25)
+        second_center = next(write[2] for write in second.writes if write[0] == 1 * 144 + (144 - 1 - 18))
+        second_outer = next(write[2] for write in second.writes if write[0] == 1 * 144 + (144 - 1 - 26))
+
+        self.assertLess(first_center, first_outer)
+        self.assertLessEqual(first_center, 100)
+        self.assertGreater(second_center, first_center)
+        self.assertLess(second_outer, first_outer)
+
     def test_modest_audio_level_starts_a_wave(self):
         state = self.audio_wave.AudioWaveState(
             self.audio_wave.AudioWaveConfig([(10, 20, 30)]),

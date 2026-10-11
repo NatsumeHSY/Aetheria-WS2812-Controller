@@ -13,12 +13,12 @@ DEFAULT_CENTERS = ((18, 1), (48, 4), (72, 2), (96, 4), (126, 1))
 DEFAULT_TIMING_MS = 25
 AUDIO_TIMEOUT_MS = 200
 RENDER_INTERVAL_MS = 5
-RING_WIDTH = 4
+PULSE_WIDTH = 14
 MAX_RADIUS = 180
 DROP_THRESHOLD = 16
 DROP_RISE = 8
-DARK_RING_MIN_STRENGTH = 96
-DARK_RING_MAX_DIMMING = 180
+DARK_PULSE_MIN_STRENGTH = 72
+DARK_PULSE_MAX_DIMMING = 235
 
 
 def _clamp_byte(value: int) -> int:
@@ -60,6 +60,16 @@ def _approx_distance(dx: int, dy: int) -> int:
     major = max(dx, dy)
     minor = min(dx, dy)
     return major + (minor * 3 // 8)
+
+
+def _pulse_profile(distance_error: int, width: int = PULSE_WIDTH) -> int:
+    """Return a smooth 0..255 darkening profile around the moving pulse."""
+    distance_error = abs(int(distance_error))
+    width = max(1, int(width))
+    if distance_error > width:
+        return 0
+    linear = ((width - distance_error) * 255) // width
+    return (linear * linear) // 255
 
 
 class AudioWaveConfig:
@@ -161,7 +171,7 @@ class AudioWaveState:
     def _advance(self, timing_ms: int) -> None:
         step = max(1, min(8, 120 // max(1, int(timing_ms))))
         for wave in self._waves:
-            wave[0] = (wave[0] + step) % MAX_RADIUS
+            wave[0] = min(MAX_RADIUS, wave[0] + step)
             wave[1] = max(0, wave[1] - wave[2])
 
     def render_frame(self, driver, brightness: int, timing_ms: int) -> None:
@@ -183,21 +193,26 @@ class AudioWaveState:
 
         brightness = _clamp_byte(brightness)
         base_color = self.config.colors[0]
+        step = max(1, min(8, 120 // max(1, int(timing_ms))))
         for y in range(LED_LINE):
             for x in range(LED_DOT_PER_LINE):
                 red, green, blue = base_color
-                ring_strength = 0
+                pulse_strength = 0
                 for index, (center_x, center_y) in enumerate(centers):
                     radius, amplitude, _, _ = waves[index]
                     if amplitude <= 0:
                         continue
                     distance = _approx_distance(x - center_x, y - center_y)
-                    ring_error = abs(distance - radius)
-                    if ring_error > RING_WIDTH:
+                    # _advance runs before drawing. Offset the visual phase
+                    # back by one step so a newly triggered wave renders its
+                    # darkest breath at the center before moving outward.
+                    pulse_radius = max(0, radius - step)
+                    profile = _pulse_profile(distance - pulse_radius)
+                    if profile <= 0:
                         continue
-                    contribution = amplitude * (RING_WIDTH - ring_error + 1) // (RING_WIDTH + 1)
-                    ring_strength = max(ring_strength, max(DARK_RING_MIN_STRENGTH, contribution))
-                dimming = ring_strength * DARK_RING_MAX_DIMMING // 255
+                    contribution = amplitude * profile // 255
+                    pulse_strength = max(pulse_strength, max(DARK_PULSE_MIN_STRENGTH, contribution))
+                dimming = pulse_strength * DARK_PULSE_MAX_DIMMING // 255
                 pixel_brightness = brightness * (255 - dimming) // 255
                 driver.set_pixel(
                     y * LED_DOT_PER_LINE + (x if y % 2 == 0 else LED_DOT_PER_LINE - 1 - x),
