@@ -101,6 +101,7 @@ CLIENT_ADDR: tuple[str, int] = None
 SOCKET_BUFFER: list[tuple[bytes, int, list]] = []
 EXPECTED_SEQ: int = None
 AUDIO_FRAME_SEQ: int = None
+AUDIO_FRAME_COUNT = 0
 AUDIO_COLORS: tuple[tuple[int, int, int], ...] = ()
 MAINTENANCE_MODE = False
 
@@ -613,7 +614,7 @@ def led_audio_control(length: int, payload: list) -> None:
     if not payload:
         return
 
-    global AUDIO_FRAME_SEQ, AUDIO_COLORS
+    global AUDIO_FRAME_SEQ, AUDIO_FRAME_COUNT, AUDIO_COLORS
     subtype = payload[0]
     if subtype == AUDIO_START_SUBTYPE:
         if length < 2:
@@ -623,6 +624,7 @@ def led_audio_control(length: int, payload: list) -> None:
             return
         colors = [tuple(payload[index:index + 3]) for index in range(2, length, 3)]
         AUDIO_FRAME_SEQ = None
+        AUDIO_FRAME_COUNT = 0
         AUDIO_COLORS = tuple(colors)
         config = AudioWaveConfig(colors, timing_ms=get_global_timing(25))
         EFFECTOR.start_audio(config)
@@ -630,11 +632,12 @@ def led_audio_control(length: int, payload: list) -> None:
 
     if subtype == AUDIO_STOP_SUBTYPE and length == 1:
         AUDIO_FRAME_SEQ = None
+        AUDIO_FRAME_COUNT = 0
         AUDIO_COLORS = ()
         EFFECTOR.stop_audio(clear=True)
 
 def accept_audio_frame(payload: list) -> bool:
-    global AUDIO_FRAME_SEQ
+    global AUDIO_FRAME_SEQ, AUDIO_FRAME_COUNT
 
     try:
         audio_seq, energy, beat, bands = decode_audio_frame_payload(payload)
@@ -644,6 +647,9 @@ def accept_audio_frame(payload: list) -> bool:
     if status != "accept":
         return False
     AUDIO_FRAME_SEQ = audio_seq
+    AUDIO_FRAME_COUNT += 1
+    if AUDIO_FRAME_COUNT == 1 or AUDIO_FRAME_COUNT % 30 == 0:
+        print(f"[INFO] Audio frame accepted: seq={audio_seq}, count={AUDIO_FRAME_COUNT}")
     if EFFECTOR is not None:
         EFFECTOR.update_audio((audio_seq, energy, beat, bands))
     return True

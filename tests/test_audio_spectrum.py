@@ -55,6 +55,15 @@ class AudioSpectrumTests(unittest.TestCase):
         self.assertEqual(first.frame_seq, 0xFFFF)
         self.assertEqual(second.frame_seq, 0x0000)
 
+    def test_reset_keeps_frame_sequence_monotonic_across_capture_sessions(self):
+        analyzer = SpectrumAnalyzer()
+
+        first = analyzer.process(np.zeros(1024, dtype=np.float32))[0]
+        analyzer.reset()
+        second = analyzer.process(np.zeros(1024, dtype=np.float32))[0]
+
+        self.assertEqual(second.frame_seq, (first.frame_seq + 1) & 0xFFFF)
+
 
 if __name__ == "__main__":
     unittest.main()

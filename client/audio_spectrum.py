@@ -60,7 +60,9 @@ class SpectrumAnalyzer:
         self._buffer = np.empty(0, dtype=np.float32)
         self._buffer_start = 0
         self._last_emitted_start = None
-        self._frame_seq = 0
+        # Keep the wire sequence monotonic when the capture device is
+        # restarted.  The board rejects replayed audio sequences, and an old
+        # UDP frame can still arrive while a new audio session is starting.
         self._smoothed.fill(0)
         self._low_baseline = 0.0
 
