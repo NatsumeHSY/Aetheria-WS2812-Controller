@@ -1,3 +1,4 @@
+import queue
 import threading
 import time
 import unittest
@@ -39,6 +40,11 @@ class FakeAnalyzer:
     def __init__(self, delay=0):
         self.delay = delay
         self.calls = 0
+        self.reset_calls = 0
+
+    def reset(self):
+        self.reset_calls += 1
+        self.calls = 0
 
     def process(self, samples):
         self.calls += 1
@@ -78,6 +84,46 @@ class AudioCaptureWorkerTests(unittest.TestCase):
 
         self.assertEqual(len(received), 1)
         self.assertEqual(received[0].bands, (1,) * 8)
+
+    def test_restart_ignores_stale_shutdown_marker_and_produces_frames(self):
+        received = []
+        first_ready = threading.Event()
+        second_ready = threading.Event()
+        backend = FakeBackend([np.ones(8, dtype=np.float32)])
+
+        def on_frame(frame):
+            received.append(frame)
+            if len(received) == 1:
+                first_ready.set()
+            if len(received) >= 2:
+                second_ready.set()
+
+        analyzer = FakeAnalyzer()
+        worker = AudioCaptureWorker(backend, analyzer, on_frame=on_frame)
+
+        worker.start()
+        try:
+            self.assertTrue(first_ready.wait(1))
+        finally:
+            worker.stop()
+
+        # A previous stop can leave its sentinel in the reused queue.  A new
+        # capture session must not let that sentinel terminate its analyzer.
+        while True:
+            try:
+                worker._queue.get_nowait()
+            except queue.Empty:
+                break
+        worker._queue.put_nowait(None)
+
+        worker.start()
+        try:
+            self.assertTrue(second_ready.wait(1))
+        finally:
+            worker.stop()
+
+        self.assertGreaterEqual(len(received), 2)
+        self.assertEqual(analyzer.reset_calls, 2)
 
     def test_backend_exception_becomes_error_status(self):
         worker = AudioCaptureWorker(FakeBackend(error=OSError("loopback unavailable")), FakeAnalyzer())

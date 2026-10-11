@@ -110,8 +110,18 @@ class AudioCaptureWorker:
             except Exception as exc:
                 start_error = exc
             else:
+                # A stop wakes the analyzer with a None sentinel.  Always
+                # allocate a fresh queue so a sentinel (or stale PCM block)
+                # from the previous session cannot terminate the next one.
+                self._queue = queue.Queue(maxsize=2)
+                reset = getattr(self.analyzer, "reset", None)
+                if callable(reset):
+                    reset()
                 self._stop_event.clear()
                 self._error = None
+                self._received_blocks = 0
+                self._dropped_blocks = 0
+                self._last_frame_at = None
                 self._running = True
                 self._reader_thread = threading.Thread(target=self._read_loop, name="audio-capture", daemon=True)
                 self._analyzer_thread = threading.Thread(target=self._analyze_loop, name="audio-spectrum", daemon=True)
