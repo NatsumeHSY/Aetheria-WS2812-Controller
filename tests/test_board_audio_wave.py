@@ -120,6 +120,28 @@ class BoardAudioWaveTests(unittest.TestCase):
         self.assertTrue(all(write[1] == (10, 20, 30) for write in driver.writes))
         self.assertTrue(all(write[2] == 123 for write in driver.writes))
 
+    def test_wave_ring_dims_the_base_brightness_without_changing_its_color(self):
+        state = self.audio_wave.AudioWaveState(
+            self.audio_wave.AudioWaveConfig([(10, 20, 30)]),
+            clock=FakeClock(100),
+        )
+        state.update(1, 200, 200, (200,) * 8)
+        driver = FakeDriver()
+
+        state.render_frame(driver, brightness=200, timing_ms=25)
+
+        self.assertTrue(any(write[2] < 200 for write in driver.writes))
+        self.assertTrue(all(write[1] == (10, 20, 30) for write in driver.writes))
+
+    def test_modest_audio_level_starts_a_wave(self):
+        state = self.audio_wave.AudioWaveState(
+            self.audio_wave.AudioWaveConfig([(10, 20, 30)]),
+            clock=FakeClock(100),
+        )
+
+        self.assertTrue(state.update(1, 20, 0, (20,) * 8))
+        self.assertGreater(state.wave_snapshot()[0][1], 0)
+
     def test_sustained_audio_does_not_retrigger_the_same_drop_every_frame(self):
         clock = FakeClock(100)
         state = self.audio_wave.AudioWaveState(

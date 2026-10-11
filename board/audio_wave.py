@@ -15,8 +15,10 @@ AUDIO_TIMEOUT_MS = 200
 RENDER_INTERVAL_MS = 5
 RING_WIDTH = 4
 MAX_RADIUS = 180
-DROP_THRESHOLD = 48
-DROP_RISE = 12
+DROP_THRESHOLD = 16
+DROP_RISE = 8
+DARK_RING_MIN_STRENGTH = 96
+DARK_RING_MAX_DIMMING = 180
 
 
 def _clamp_byte(value: int) -> int:
@@ -170,7 +172,6 @@ class AudioWaveState:
                 self._advance(timing_ms)
             waves = tuple(tuple(wave) for wave in self._waves)
             centers = self.config.centers
-            colors = self.center_colors()
         finally:
             self._lock.release()
 
@@ -185,6 +186,7 @@ class AudioWaveState:
         for y in range(LED_LINE):
             for x in range(LED_DOT_PER_LINE):
                 red, green, blue = base_color
+                ring_strength = 0
                 for index, (center_x, center_y) in enumerate(centers):
                     radius, amplitude, _, _ = waves[index]
                     if amplitude <= 0:
@@ -194,14 +196,13 @@ class AudioWaveState:
                     if ring_error > RING_WIDTH:
                         continue
                     contribution = amplitude * (RING_WIDTH - ring_error + 1) // (RING_WIDTH + 1)
-                    color = colors[index]
-                    red += color[0] * contribution // 255
-                    green += color[1] * contribution // 255
-                    blue += color[2] * contribution // 255
+                    ring_strength = max(ring_strength, max(DARK_RING_MIN_STRENGTH, contribution))
+                dimming = ring_strength * DARK_RING_MAX_DIMMING // 255
+                pixel_brightness = brightness * (255 - dimming) // 255
                 driver.set_pixel(
                     y * LED_DOT_PER_LINE + (x if y % 2 == 0 else LED_DOT_PER_LINE - 1 - x),
                     (_clamp_byte(red), _clamp_byte(green), _clamp_byte(blue)),
-                    brightness,
+                    pixel_brightness,
                     False,
                 )
         driver.show()
