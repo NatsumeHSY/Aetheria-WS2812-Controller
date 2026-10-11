@@ -15,6 +15,8 @@ AUDIO_TIMEOUT_MS = 200
 RENDER_INTERVAL_MS = 5
 RING_WIDTH = 4
 MAX_RADIUS = 180
+DROP_THRESHOLD = 48
+DROP_RISE = 12
 
 
 def _clamp_byte(value: int) -> int:
@@ -81,6 +83,7 @@ class AudioWaveState:
         self._last_update_ms = self._clock()
         self._active = True
         self._waves = [[0, 0, 0, 0] for _ in config.centers]
+        self._trigger_levels = [0 for _ in config.centers]
 
     def center_colors(self) -> tuple[tuple[int, int, int], ...]:
         return tuple(self.config.colors[index % len(self.config.colors)] for index in range(len(self.config.centers)))
@@ -106,12 +109,22 @@ class AudioWaveState:
             for index, band_indexes in enumerate(center_bands):
                 band_level = max(bands[band_indexes[0]], bands[band_indexes[1]])
                 injection = min(255, (band_level * 3 // 4) + (energy // 4) + (beat // 2))
+                trigger_level = max(band_level, energy, beat)
+                previous_level = self._trigger_levels[index]
                 radius, amplitude, decay, _ = self._waves[index]
-                if injection > amplitude:
+                is_new_drop = (
+                    trigger_level >= DROP_THRESHOLD
+                    and (
+                        previous_level < DROP_THRESHOLD
+                        or trigger_level >= previous_level + DROP_RISE
+                    )
+                )
+                if is_new_drop:
                     radius = 0
-                amplitude = max(amplitude, injection)
+                    amplitude = max(amplitude, injection)
                 decay = max(1, 1 + (255 - band_level) // 64)
                 self._waves[index] = [radius, amplitude, decay, band_level]
+                self._trigger_levels[index] = trigger_level
             return True
         finally:
             self._lock.release()
@@ -132,6 +145,7 @@ class AudioWaveState:
             self._last_frame_seq = None
             self._last_update_ms = None
             self._waves = [[0, 0, 0, 0] for _ in self.config.centers]
+            self._trigger_levels = [0 for _ in self.config.centers]
         finally:
             self._lock.release()
 
@@ -167,11 +181,10 @@ class AudioWaveState:
             return
 
         brightness = _clamp_byte(brightness)
+        base_color = self.config.colors[0]
         for y in range(LED_LINE):
             for x in range(LED_DOT_PER_LINE):
-                red = 0
-                green = 0
-                blue = 0
+                red, green, blue = base_color
                 for index, (center_x, center_y) in enumerate(centers):
                     radius, amplitude, _, _ = waves[index]
                     if amplitude <= 0:

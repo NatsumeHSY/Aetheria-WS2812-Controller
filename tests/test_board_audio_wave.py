@@ -107,6 +107,37 @@ class BoardAudioWaveTests(unittest.TestCase):
         self.assertTrue(all(0 <= write[2] <= 255 for write in driver.writes))
         self.assertEqual(driver.shows, 2)
 
+    def test_render_keeps_the_first_color_as_a_constant_base(self):
+        state = self.audio_wave.AudioWaveState(
+            self.audio_wave.AudioWaveConfig([(10, 20, 30), (200, 100, 50)]),
+            clock=FakeClock(100),
+        )
+        driver = FakeDriver()
+
+        state.render_frame(driver, brightness=123, timing_ms=25)
+
+        self.assertEqual(len(driver.writes), 864)
+        self.assertTrue(all(write[1] == (10, 20, 30) for write in driver.writes))
+        self.assertTrue(all(write[2] == 123 for write in driver.writes))
+
+    def test_sustained_audio_does_not_retrigger_the_same_drop_every_frame(self):
+        clock = FakeClock(100)
+        state = self.audio_wave.AudioWaveState(
+            self.audio_wave.AudioWaveConfig([(10, 20, 30)]),
+            clock=clock,
+        )
+        bands = (180,) * 8
+
+        self.assertTrue(state.update(1, 180, 180, bands))
+        driver = FakeDriver()
+        state.render_frame(driver, brightness=255, timing_ms=25)
+        radius_after_first_frame = state.wave_snapshot()[0][0]
+        self.assertGreater(radius_after_first_frame, 0)
+
+        clock.value += 5
+        self.assertTrue(state.update(2, 180, 180, bands))
+        self.assertGreater(state.wave_snapshot()[0][0], 0)
+
     def test_expiry_and_stop_disable_rendering(self):
         clock = FakeClock(100)
         state = self.audio_wave.AudioWaveState(
