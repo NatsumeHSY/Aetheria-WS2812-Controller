@@ -94,6 +94,10 @@ class FakeAudioEffect:
     def status(self):
         return dict(self._status)
 
+    def test_center(self, center):
+        self.calls.append(("test_audio_center", center))
+        return dict(self._status)
+
 
 class WebUiBridgeTests(unittest.TestCase):
     def make_bridge(self, store):
@@ -257,6 +261,18 @@ class WebUiBridgeTests(unittest.TestCase):
 
             bridge.disconnect()
             self.assertEqual(calls[-2:], [("audio_effect_stop",), ("disconnect",)])
+
+    def test_audio_center_test_is_exposed_through_bridge(self):
+        with tempfile.TemporaryDirectory() as directory:
+            calls = []
+            bridge = self.make_bridge(MatrixShapeStore(Path(directory) / "shapes.json"))
+            bridge.controller = AudioBridgeController(calls)
+            bridge.audio_effect = FakeAudioEffect(calls)
+
+            result = bridge.test_audio_center(3)
+
+            self.assertEqual(result, {"ok": True, "connected": True, "audio": {"active": False, "error": ""}})
+            self.assertEqual(calls, [("test_audio_center", 3)])
 
     def test_sync_audio_mode_reactivates_saved_board_audio_state(self):
         snapshot = SyncSnapshot(5, 80, 180, 20, ((17, 34, 51),), None)

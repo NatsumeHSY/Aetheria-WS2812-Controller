@@ -165,6 +165,25 @@ class JavaScriptBridge:
             "audio": effect.status() if effect is not None else {"active": False},
         }
 
+    def test_audio_center(self, center: int) -> dict:
+        effect = getattr(self, "audio_effect", None)
+        if effect is None:
+            return {"ok": False, "connected": self.controller.connected, "error": "音频响应效果不可用"}
+        if not self.controller.connected:
+            return {"ok": False, "connected": False, "error": "设备未连接"}
+        try:
+            return {
+                "ok": True,
+                "connected": True,
+                "audio": effect.test_center(center),
+            }
+        except (ControllerError, OSError, RuntimeError, TypeError, ValueError) as error:
+            return {
+                "ok": False,
+                "connected": self.controller.connected,
+                "error": str(error),
+            }
+
     def close(self) -> None:
         self._stop_audio_effect()
         effect = getattr(self, "media_effect", None)

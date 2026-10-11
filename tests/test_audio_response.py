@@ -56,6 +56,7 @@ class FakeAudioController:
         self.log = log
         self.connected = True
         self.send_error = None
+        self.sent_frames = []
 
     def start_audio(self, colors):
         self.log.append(("start_audio", colors))
@@ -64,6 +65,7 @@ class FakeAudioController:
     def send_audio_frame(self, frame):
         if self.send_error is not None:
             raise self.send_error
+        self.sent_frames.append(frame)
         self.log.append(("send_audio_frame", frame.frame_seq))
 
     def stop_audio(self):
@@ -164,6 +166,36 @@ class AudioResponseEffectTests(unittest.TestCase):
         self.assertEqual(status["signal"]["energy"], 100)
         self.assertEqual(status["signal"]["beat"], 25)
         self.assertEqual(status["error"], "")
+        effect.stop()
+
+    def test_test_center_sends_a_targeted_synthetic_audio_frame(self):
+        log = []
+        controller = FakeAudioController(log)
+        capture = FakeCapture(log)
+        effect = AudioResponseEffect(controller, capture=capture)
+        effect.activate([(1, 2, 3)])
+
+        effect._on_frame(AudioFrame(40, (1,) * 8, 1, 0))
+        deadline = time.monotonic() + 1
+        while len(controller.sent_frames) < 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        effect.test_center(2)
+        frame = controller.sent_frames[-1]
+
+        self.assertEqual(frame.frame_seq, 41)
+        self.assertEqual(frame.energy, 255)
+        self.assertEqual(frame.beat, 255)
+        self.assertEqual(frame.bands, (0, 0, 255, 255, 0, 0, 0, 0))
+        effect.stop()
+
+    def test_test_center_rejects_unknown_center(self):
+        effect = AudioResponseEffect(FakeAudioController([]), capture=FakeCapture([]))
+        effect.activate([(1, 2, 3)])
+
+        with self.assertRaises(ValueError):
+            effect.test_center(5)
+
         effect.stop()
 
     def test_frame_send_failure_stops_capture_and_board_audio(self):

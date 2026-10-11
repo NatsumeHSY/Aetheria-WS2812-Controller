@@ -21,6 +21,22 @@ def _color(color: Sequence[int]) -> tuple[int, int, int]:
     return values
 
 
+AUDIO_TEST_CENTER_BANDS = (
+    (0, 1),
+    (1, 2),
+    (2, 3),
+    (4, 5),
+    (6, 7),
+)
+
+
+def _sequence_is_newer(previous: int | None, current: int) -> bool:
+    if previous is None:
+        return True
+    distance = (int(current) - int(previous)) & 0xFFFF
+    return distance != 0 and distance < 0x8000
+
+
 class AudioResponseEffect:
     def __init__(self, controller, capture=None, analyzer=None, backend=None) -> None:
         self.controller = controller
@@ -52,6 +68,9 @@ class AudioResponseEffect:
         self._pending_frame: AudioFrame | None = None
         self._generation = 0
         self._board_active = False
+        # Keep the wire sequence monotonic even when a manual test frame is
+        # inserted between frames coming from the analyzer.
+        self._wire_frame_seq: int | None = None
 
     def activate(self, colors: Sequence[Sequence[int]]) -> dict:
         normalized = tuple(_color(color) for color in colors)
@@ -157,11 +176,48 @@ class AudioResponseEffect:
             "error": error,
         }
 
+    def test_center(self, center: int, level: int = 255) -> dict:
+        """Send one synthetic frame that excites a single board wave center."""
+        center = int(center)
+        if not 0 <= center < len(AUDIO_TEST_CENTER_BANDS):
+            raise ValueError("audio test center must be between 0 and 4")
+        level = max(0, min(255, int(level)))
+
+        with self.lock:
+            if not self._active:
+                raise RuntimeError("audio response is not active")
+            previous = self._wire_frame_seq
+            if previous is None and self._last_frame is not None:
+                previous = self._last_frame.frame_seq
+            frame_seq = 0 if previous is None else (previous + 1) & 0xFFFF
+            bands = [0] * 8
+            for band in AUDIO_TEST_CENTER_BANDS[center]:
+                bands[band] = level
+            frame = AudioFrame(frame_seq, tuple(bands), level, level)
+            self._wire_frame_seq = frame_seq
+            self._last_frame = frame
+            # A test signal is the newest requested frame. Drop an older
+            # coalesced capture frame so it cannot overwrite the test signal.
+            self._pending_frame = None
+            self._frame_event.clear()
+
+        try:
+            self.controller.send_audio_frame(frame)
+        except Exception as error:
+            with self.lock:
+                self._error = str(error)
+            raise
+        with self.lock:
+            self._last_sent_at = time.monotonic()
+        return self.status()
+
     def _on_frame(self, frame: AudioFrame) -> None:
         with self.lock:
             if not self._active:
                 return
             self._last_frame = frame
+            if _sequence_is_newer(self._wire_frame_seq, frame.frame_seq):
+                self._wire_frame_seq = frame.frame_seq
             self._pending_frame = frame
             self._frame_event.set()
 

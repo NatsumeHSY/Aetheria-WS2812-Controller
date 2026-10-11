@@ -157,6 +157,9 @@ class ClientUiTests(unittest.TestCase):
         for symbol in ("renderAudioStatus", "startAudioStatusMonitor", "stopAudioStatusMonitor"):
             self.assertIn(f"function {symbol}", index)
         self.assertIn('bridgeApiCall("audio_status")', index)
+        self.assertIn('bridgeCall("test_audio_center"', index)
+        self.assertIn('id="audioTestButton"', runtime)
+        self.assertIn('id="audioTestButton"', preview)
         self.assertIn("startAudioStatusMonitor", index)
         self.assertIn("stopAudioStatusMonitor", index)
 

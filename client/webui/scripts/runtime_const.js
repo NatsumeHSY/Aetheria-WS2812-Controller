@@ -85,6 +85,10 @@ window.htmlHeadContent = `
   .modal-input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(141, 201, 188, 0.12); }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
   .modal-actions .tool-button { min-width: 78px; }
+  .audio-test-panel[hidden] { display: none; }
+  .audio-test-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 18px; }
+  .audio-test-grid .tool-button { min-height: 38px; }
+  .audio-test-grid .tool-button:last-child { grid-column: 1 / -1; }
   .modal-confirm.danger { color: #07131b; background: var(--coral); border-color: var(--coral); }
   .modal-confirm.danger:hover { color: #07131b; background: #e9ad99; border-color: #e9ad99; }
 
@@ -211,6 +215,8 @@ window.htmlHeadContent = `
   .audio-response-status { display: grid; gap: 10px; margin-top: 12px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-deep); }
   .audio-response-status[hidden] { display: none; }
   .audio-response-head, .audio-response-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .audio-response-actions { display: inline-flex; align-items: center; gap: 8px; }
+  .audio-test-trigger { padding: 6px 9px; font-size: 10px; }
   .audio-response-label { color: var(--ink); font-size: 11px; }
   .audio-response-detail, .audio-response-meta { color: var(--ink-muted); font-size: 10px; }
   .audio-meter-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -305,7 +311,7 @@ window.htmlBodyContent = `
       <div class="control-section"><div class="control-label"><span>快捷效果</span><span class="value-display">5 effects</span></div><div class="mode-grid"><button class="mode-btn mode-button active" type="button">静态常亮</button><button class="mode-btn mode-button" type="button">呼吸渐变</button><button class="mode-btn mode-button" type="button">流光溢彩</button><button class="mode-btn mode-button" type="button">媒体封面</button><button class="mode-btn mode-button" type="button">音频响应</button></div>
         <div class="media-color-status" id="mediaColorStatus" aria-live="polite" hidden><span class="media-color-swatch" id="mediaColorSwatch" aria-hidden="true"></span><span class="media-color-copy"><span class="media-color-label" id="mediaColorLabel">使用默认快捷颜色</span><span class="media-color-detail" id="mediaColorDetail">暂无媒体播放 · 平滑回退</span></span></div>
         <div class="audio-response-status" id="audioResponseStatus" aria-live="polite" hidden>
-          <div class="audio-response-head"><span class="audio-response-label" id="audioStatusLabel">音频响应待机</span><span class="value-display">实时频谱</span></div>
+          <div class="audio-response-head"><span class="audio-response-label" id="audioStatusLabel">音频响应待机</span><span class="audio-response-actions"><button class="tool-button audio-test-trigger" id="audioTestButton" type="button">测试水波</button><span class="value-display">实时频谱</span></span></div>
           <div class="audio-meter-grid" aria-label="音频频段能量"><div class="audio-meter"><span>低频</span><div class="audio-meter-track"><div class="audio-meter-fill" id="audioBandLow"></div></div></div><div class="audio-meter"><span>中频</span><div class="audio-meter-track"><div class="audio-meter-fill" id="audioBandMid"></div></div></div><div class="audio-meter"><span>高频</span><div class="audio-meter-track"><div class="audio-meter-fill" id="audioBandHigh"></div></div></div></div>
           <div class="audio-response-meta"><span id="audioCaptureDetail">等待音频捕获</span><span id="audioFrameAge">尚无音频帧</span></div>
         </div>
@@ -323,6 +329,16 @@ window.htmlBodyContent = `
         <span id="modalInputLabel">名称</span>
         <input class="modal-input" id="modalInput" type="text" autocomplete="off" />
       </label>
+      <div class="audio-test-panel" id="audioTestPanel" hidden>
+        <div class="audio-test-grid" aria-label="水波中心测试">
+          <button class="tool-button" data-audio-test-center="0" type="button">中心 1</button>
+          <button class="tool-button" data-audio-test-center="1" type="button">中心 2</button>
+          <button class="tool-button" data-audio-test-center="2" type="button">中心 3</button>
+          <button class="tool-button" data-audio-test-center="3" type="button">中心 4</button>
+          <button class="tool-button" data-audio-test-center="4" type="button">中心 5</button>
+          <button class="tool-button primary" data-audio-test-center="all" type="button">全部中心</button>
+        </div>
+      </div>
       <div class="modal-actions">
         <button class="tool-button modal-cancel" id="modalCancelButton" type="button">取消</button>
         <button class="tool-button primary modal-confirm" id="modalConfirmButton" type="button">确认</button>

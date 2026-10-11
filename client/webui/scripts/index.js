@@ -40,6 +40,10 @@ function closeModal(result = null) {
     activeModalResolve = null;
     modal.hidden = true;
     modal.removeAttribute("data-variant");
+    const audioTestPanel = document.getElementById("audioTestPanel");
+    if (audioTestPanel) audioTestPanel.hidden = true;
+    const confirmButton = document.getElementById("modalConfirmButton");
+    if (confirmButton) confirmButton.hidden = false;
     document.body.classList.remove("modal-open");
     if (modalPreviousFocus && typeof modalPreviousFocus.focus === "function") {
         modalPreviousFocus.focus();
@@ -70,6 +74,7 @@ function openModal({
     const input = document.getElementById("modalInput");
     const cancelButton = document.getElementById("modalCancelButton");
     const confirmButton = document.getElementById("modalConfirmButton");
+    const audioTestPanel = document.getElementById("audioTestPanel");
 
     activeModalMode = mode;
     modalPreviousFocus = document.activeElement;
@@ -83,6 +88,8 @@ function openModal({
     cancelButton.textContent = cancelLabel;
     cancelButton.hidden = mode === "notice";
     confirmButton.textContent = confirmLabel;
+    confirmButton.hidden = false;
+    if (audioTestPanel) audioTestPanel.hidden = true;
     modal.hidden = false;
     document.body.classList.add("modal-open");
 
@@ -91,6 +98,38 @@ function openModal({
         window.requestAnimationFrame(() => {
             if (mode === "prompt") input.focus();
             else confirmButton.focus();
+        });
+    });
+}
+
+function openAudioTestModal() {
+    const modal = document.getElementById("appModal");
+    const titleElement = document.getElementById("modalTitle");
+    const messageElement = document.getElementById("modalMessage");
+    const inputWrap = document.getElementById("modalInputWrap");
+    const audioTestPanel = document.getElementById("audioTestPanel");
+    const cancelButton = document.getElementById("modalCancelButton");
+    const confirmButton = document.getElementById("modalConfirmButton");
+    if (!modal || !audioTestPanel) return Promise.resolve(null);
+    if (activeModalResolve) closeModal(null);
+
+    activeModalMode = "audio-test";
+    modalPreviousFocus = document.activeElement;
+    modal.dataset.variant = "neutral";
+    titleElement.textContent = "水波中心测试";
+    messageElement.textContent = "选择一个中心点发送测试信号，观察水波向四周扩散。";
+    inputWrap.hidden = true;
+    audioTestPanel.hidden = false;
+    cancelButton.textContent = "关闭";
+    cancelButton.hidden = false;
+    confirmButton.hidden = true;
+    modal.hidden = false;
+    document.body.classList.add("modal-open");
+
+    return new Promise(resolve => {
+        activeModalResolve = resolve;
+        window.requestAnimationFrame(() => {
+            audioTestPanel.querySelector("[data-audio-test-center]")?.focus();
         });
     });
 }
@@ -120,7 +159,9 @@ function showPrompt(title, message, inputValue = "", options = {}) {
 }
 
 function modalCancelResult() {
-    return activeModalMode === "notice" ? true : activeModalMode === "confirm" ? false : null;
+    return activeModalMode === "notice" || activeModalMode === "audio-test"
+        ? true
+        : activeModalMode === "confirm" ? false : null;
 }
 
 function handleModalKeydown(event) {
@@ -148,7 +189,12 @@ function bindModalEvents() {
         closeModal(activeModalMode === "prompt" ? input.value : true);
     });
     backdrop?.addEventListener("click", () => {
-        if (activeModalMode === "notice") closeModal(true);
+        if (activeModalMode === "notice" || activeModalMode === "audio-test") closeModal(true);
+    });
+    document.getElementById("audioTestPanel")?.addEventListener("click", event => {
+        const button = event.target.closest("[data-audio-test-center]");
+        if (!button || button.disabled) return;
+        void sendAudioTest(button.dataset.audioTestCenter, button);
     });
     document.addEventListener("keydown", handleModalKeydown);
 }
@@ -477,6 +523,8 @@ function averageBands(bands, start, end) {
 function renderAudioStatus(audio) {
     audioRunning = audio?.active === true;
     updateAudioVisibility();
+    const testButton = document.getElementById("audioTestButton");
+    if (testButton) testButton.disabled = !audioRunning || maintenanceMode;
     const bands = audio?.signal?.bands || [];
     const values = {
         low: averageBands(bands, 0, 2),
@@ -502,6 +550,38 @@ function renderAudioStatus(audio) {
     }
     const sendAge = audio?.send_age;
     if (age) age.textContent = sendAge == null ? "尚无音频帧" : `最近帧 ${Math.max(0, Math.floor(sendAge * 1000))} ms 前`;
+}
+
+async function sendAudioTest(center, sourceButton) {
+    const centers = center === "all" ? [0, 1, 2, 3, 4] : [Number(center)];
+    if (centers.some(value => !Number.isInteger(value) || value < 0 || value > 4)) return;
+
+    const buttons = Array.from(document.querySelectorAll("[data-audio-test-center]"));
+    buttons.forEach(button => { button.disabled = true; });
+    const originalLabel = sourceButton.textContent;
+    sourceButton.textContent = "发送中…";
+    try {
+        let result = { ok: true };
+        for (const target of centers) {
+            result = await bridgeCall("test_audio_center", target);
+            if (!result.ok) break;
+        }
+        const message = document.getElementById("modalMessage");
+        if (result.ok) {
+            message.textContent = center === "all"
+                ? "已按顺序发送全部五个中心的测试信号。"
+                : `已发送中心 ${Number(center) + 1} 的测试信号。`;
+            setStatus("水波测试信号已发送", true);
+        } else {
+            message.textContent = result.error || "水波测试发送失败。";
+            setStatus(result.error || "水波测试发送失败", false);
+        }
+    } finally {
+        sourceButton.textContent = originalLabel;
+        buttons.forEach(button => { button.disabled = false; });
+        const testButton = document.getElementById("audioTestButton");
+        if (testButton) testButton.disabled = !audioRunning || maintenanceMode;
+    }
 }
 
 async function refreshAudioStatus() {
@@ -1032,6 +1112,7 @@ function bindEvents() {
     renderPaletteColors(getPaletteColors().length ? getPaletteColors() : ["#d88773"]);
     updateRhythmControl();
     bindModalEvents();
+    document.getElementById("audioTestButton")?.addEventListener("click", openAudioTestModal);
 
     document.addEventListener("mouseup", () => { isDrawing = false; });
 
