@@ -71,27 +71,6 @@ def classify_sequence(expected: int | None, received: int) -> tuple[str, int]:
     return "replay", expected
 
 
-def classify_audio_sequence(previous: int | None, received: int) -> tuple[str, int]:
-    received &= 0xffff
-    if previous is None:
-        return "accept", received
-
-    distance = (received - previous) & 0xffff
-    if distance == 0 or distance >= 0x8000:
-        return "replay", previous
-    return "accept", received
-
-
-def decode_audio_frame_payload(payload: list) -> tuple[int, int, int, tuple[int, ...]]:
-    if len(payload) != 13 or payload[0] != 0x01:
-        raise ValueError("invalid audio frame payload")
-    audio_seq = (payload[1] << 8) | payload[2]
-    energy = payload[3]
-    beat = payload[4]
-    bands = tuple(payload[5:13])
-    return audio_seq, energy, beat, bands
-
-
 def restore_health_session(
     remembered_addr: tuple[str, int] | None,
     received_addr: tuple[str, int],

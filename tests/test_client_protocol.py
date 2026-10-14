@@ -2,10 +2,6 @@ import unittest
 
 from client.protocol import (
     ACK,
-    AUDIO_COMMAND,
-    AUDIO_FRAME_SUBTYPE,
-    AUDIO_START_SUBTYPE,
-    AUDIO_STOP_SUBTYPE,
     HEALTH_ACK,
     HEALTH_COMMAND,
     HANDSHAKE,
@@ -20,9 +16,6 @@ from client.protocol import (
     build_packet,
     build_white_balance_packet,
     build_brightness_packet,
-    build_audio_frame_packet,
-    build_audio_start_packet,
-    build_audio_stop_packet,
     build_health_packet,
     build_reset_state_packet,
     build_restart_packet,
@@ -37,29 +30,6 @@ from client.controller import LEDController
 
 
 class ClientProtocolTests(unittest.TestCase):
-    def test_audio_start_and_stop_use_effect_command_zero_a(self):
-        start = build_audio_start_packet([(1, 2, 3), (4, 5, 6)], sequence=0x1234)
-        stop = build_audio_stop_packet(sequence=0x1235)
-
-        self.assertEqual(decode_packet(start), (AUDIO_COMMAND, 0x1234, [AUDIO_START_SUBTYPE, 2, 1, 2, 3, 4, 5, 6]))
-        self.assertEqual(decode_packet(stop), (AUDIO_COMMAND, 0x1235, [AUDIO_STOP_SUBTYPE]))
-
-    def test_audio_frame_uses_independent_sequence_and_fixed_payload(self):
-        packet = build_audio_frame_packet(0xFFFF, (1, 2, 3, 4, 5, 6, 7, 8), 200, 99)
-
-        command, sequence, payload = decode_packet(packet)
-        self.assertEqual(command, AUDIO_COMMAND)
-        self.assertEqual(sequence, 0)
-        self.assertEqual(payload, [AUDIO_FRAME_SUBTYPE, 0xFF, 0xFF, 200, 99, 1, 2, 3, 4, 5, 6, 7, 8])
-
-    def test_audio_packet_builders_reject_invalid_payload_values(self):
-        with self.assertRaises(ValueError):
-            build_audio_start_packet([])
-        with self.assertRaises(ValueError):
-            build_audio_start_packet([(1, 2)])
-        with self.assertRaises(ValueError):
-            build_audio_frame_packet(0, (1, 2, 3), 0, 0)
-
     def test_build_and_decode_packet_with_crc4(self):
         packet = build_packet(0x01, [0x10, 0x20], 0x1234)
 

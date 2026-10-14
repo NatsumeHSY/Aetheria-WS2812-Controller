@@ -208,38 +208,13 @@ class BoardProtocolTests(unittest.TestCase):
             protocol.crc4_itu(0x12 ^ 0x10 ^ 0x20),
         )
 
-    def test_audio_effect_command_uses_zero_a_and_audio_subtypes(self):
+    def test_audio_response_is_not_registered_in_board_runtime(self):
         config = load_extracted_board_module("config")
-
-        self.assertEqual(config.AUDIO_COMMAND, b"\x0A")
-        self.assertEqual(config.AUDIO_START_SUBTYPE, 0x00)
-        self.assertEqual(config.AUDIO_FRAME_SUBTYPE, 0x01)
-        self.assertEqual(config.AUDIO_STOP_SUBTYPE, 0x02)
-
-    def test_audio_sequence_accepts_wrap_and_rejects_replay(self):
-        protocol = load_extracted_board_module("protocol")
-
-        self.assertEqual(protocol.classify_audio_sequence(None, 0xFFFF), ("accept", 0xFFFF))
-        self.assertEqual(protocol.classify_audio_sequence(0xFFFF, 0x0000), ("accept", 0x0000))
-        self.assertEqual(protocol.classify_audio_sequence(0x0000, 0x0000), ("replay", 0x0000))
-        self.assertEqual(protocol.classify_audio_sequence(0x0001, 0xFFFF), ("replay", 0x0001))
-
-    def test_audio_frame_payload_decoder_requires_fixed_layout(self):
-        protocol = load_extracted_board_module("protocol")
-
-        self.assertEqual(
-            protocol.decode_audio_frame_payload([1, 0x12, 0x34, 200, 99, 1, 2, 3, 4, 5, 6, 7, 8]),
-            (0x1234, 200, 99, (1, 2, 3, 4, 5, 6, 7, 8)),
-        )
-        with self.assertRaises(ValueError):
-            protocol.decode_audio_frame_payload([1, 0, 0])
-
-    def test_board_socket_loop_special_cases_realtime_audio_frames(self):
         source = BOARD_MAIN.read_text(encoding="utf-8")
 
-        self.assertIn("if cmd == AUDIO_COMMAND and payload and payload[0] == AUDIO_FRAME_SUBTYPE:", source)
-        self.assertIn("classify_audio_sequence", source)
-        self.assertIn("SOCKET_BUFFER.append((cmd, length, payload))", source)
+        self.assertFalse(hasattr(config, "AUDIO_COMMAND"))
+        self.assertNotIn("AUDIO_COMMAND: led_audio_control", source)
+        self.assertNotIn("accept_audio_frame", source)
 
     def test_validate_packet_requires_exact_header_and_payload_length(self):
         validate_packet = load_protocol_helpers()["validate_packet"]

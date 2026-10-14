@@ -83,12 +83,13 @@ window.htmlHeadContent = `
   .modal-input-wrap[hidden] { display: none; }
   .modal-input { width: 100%; min-height: 40px; padding: 9px 11px; color: var(--ink); background: rgba(4, 16, 23, 0.72); border: 1px solid var(--line); border-radius: 10px; outline: none; }
   .modal-input:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(141, 201, 188, 0.12); }
+  .white-balance-modal-panel { margin-top: 20px; padding: 14px; background: rgba(4, 16, 23, 0.5); border: 1px solid var(--line); border-radius: 14px; }
+  .white-balance-modal-panel[hidden] { display: none; }
+  .white-balance-modal-panel .white-balance-grid { gap: 12px; }
+  .white-balance-open { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left; }
+  .white-balance-summary { color: var(--teal-deep); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
   .modal-actions .tool-button { min-width: 78px; }
-  .audio-test-panel[hidden] { display: none; }
-  .audio-test-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 18px; }
-  .audio-test-grid .tool-button { min-height: 38px; }
-  .audio-test-grid .tool-button:last-child { grid-column: 1 / -1; }
   .modal-confirm.danger { color: #07131b; background: var(--coral); border-color: var(--coral); }
   .modal-confirm.danger:hover { color: #07131b; background: #e9ad99; border-color: #e9ad99; }
 
@@ -212,17 +213,6 @@ window.htmlHeadContent = `
   .media-color-copy { display: grid; min-width: 0; gap: 4px; }
   .media-color-label { color: var(--ink); font-size: 11px; }
   .media-color-detail { color: var(--ink-muted); font-size: 10px; overflow-wrap: anywhere; }
-  .audio-response-status { display: grid; gap: 10px; margin-top: 12px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-deep); }
-  .audio-response-status[hidden] { display: none; }
-  .audio-response-head, .audio-response-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .audio-response-actions { display: inline-flex; align-items: center; gap: 8px; }
-  .audio-test-trigger { padding: 6px 9px; font-size: 10px; }
-  .audio-response-label { color: var(--ink); font-size: 11px; }
-  .audio-response-detail, .audio-response-meta { color: var(--ink-muted); font-size: 10px; }
-  .audio-meter-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  .audio-meter { display: grid; gap: 5px; color: var(--ink-muted); font-size: 9px; }
-  .audio-meter-track { height: 5px; overflow: hidden; background: rgba(141, 201, 188, 0.14); border-radius: 99px; }
-  .audio-meter-fill { width: 0; height: 100%; background: var(--teal); border-radius: inherit; transition: width 120ms ease; }
   .palette-list { display: grid; height: 184px; gap: 8px; align-content: start; overflow-y: scroll; padding: 8px 6px 8px 8px; border: 1px solid var(--line); border-radius: 12px; scrollbar-color: var(--teal) transparent; }
   .palette-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: center; }
   .palette-row.removable { grid-template-columns: minmax(0, 1fr) auto; }
@@ -299,22 +289,12 @@ window.htmlBodyContent = `
       </div>
       <div class="control-section">
         <div class="control-label"><span>白平衡</span><span class="value-display">输出校正</span></div>
-        <div class="white-balance-grid" aria-label="白平衡通道校正">
-          <label class="white-balance-row"><span>红 R</span><input id="whiteBalanceRed" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceRedValue">255</output></label>
-          <label class="white-balance-row"><span>绿 G</span><input id="whiteBalanceGreen" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceGreenValue">255</output></label>
-          <label class="white-balance-row"><span>蓝 B</span><input id="whiteBalanceBlue" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceBlueValue">255</output></label>
-        </div>
-        <button class="tool-button white-balance-reset" id="resetWhiteBalance" type="button">恢复默认白平衡</button>
+        <button class="tool-button white-balance-open" id="whiteBalanceButton" type="button"><span>调整白平衡</span><span class="white-balance-summary" id="whiteBalanceSummary">R 255 · G 255 · B 255</span></button>
       </div>
       <div class="control-section"><div class="control-label"><span>亮度</span><span class="value-display" id="brightValue">72%</span></div><input id="brightness" type="range" min="0" max="100" value="72" /></div>
       <div class="control-section"><div class="control-label"><span>节奏</span><span class="value-display" id="speedValue">50</span></div><input id="speed" type="range" min="10" max="200" value="50" /></div>
-      <div class="control-section"><div class="control-label"><span>快捷效果</span><span class="value-display">5 effects</span></div><div class="mode-grid"><button class="mode-btn mode-button active" type="button">静态常亮</button><button class="mode-btn mode-button" type="button">呼吸渐变</button><button class="mode-btn mode-button" type="button">流光溢彩</button><button class="mode-btn mode-button" type="button">媒体封面</button><button class="mode-btn mode-button" type="button">音频响应</button></div>
+      <div class="control-section"><div class="control-label"><span>快捷效果</span><span class="value-display">4 effects</span></div><div class="mode-grid"><button class="mode-btn mode-button active" type="button">静态常亮</button><button class="mode-btn mode-button" type="button">呼吸渐变</button><button class="mode-btn mode-button" type="button">流光溢彩</button><button class="mode-btn mode-button" type="button">媒体封面</button></div>
         <div class="media-color-status" id="mediaColorStatus" aria-live="polite" hidden><span class="media-color-swatch" id="mediaColorSwatch" aria-hidden="true"></span><span class="media-color-copy"><span class="media-color-label" id="mediaColorLabel">使用默认快捷颜色</span><span class="media-color-detail" id="mediaColorDetail">暂无媒体播放 · 平滑回退</span></span></div>
-        <div class="audio-response-status" id="audioResponseStatus" aria-live="polite" hidden>
-          <div class="audio-response-head"><span class="audio-response-label" id="audioStatusLabel">音频响应待机</span><span class="audio-response-actions"><button class="tool-button audio-test-trigger" id="audioTestButton" type="button">测试水波</button><span class="value-display">实时频谱</span></span></div>
-          <div class="audio-meter-grid" aria-label="音频频段能量"><div class="audio-meter"><span>低频</span><div class="audio-meter-track"><div class="audio-meter-fill" id="audioBandLow"></div></div></div><div class="audio-meter"><span>中频</span><div class="audio-meter-track"><div class="audio-meter-fill" id="audioBandMid"></div></div></div><div class="audio-meter"><span>高频</span><div class="audio-meter-track"><div class="audio-meter-fill" id="audioBandHigh"></div></div></div></div>
-          <div class="audio-response-meta"><span id="audioCaptureDetail">等待音频捕获</span><span id="audioFrameAge">尚无音频帧</span></div>
-        </div>
       </div>
     </aside>
   </section>
@@ -329,15 +309,13 @@ window.htmlBodyContent = `
         <span id="modalInputLabel">名称</span>
         <input class="modal-input" id="modalInput" type="text" autocomplete="off" />
       </label>
-      <div class="audio-test-panel" id="audioTestPanel" hidden>
-        <div class="audio-test-grid" aria-label="水波中心测试">
-          <button class="tool-button" data-audio-test-center="0" type="button">中心 1</button>
-          <button class="tool-button" data-audio-test-center="1" type="button">中心 2</button>
-          <button class="tool-button" data-audio-test-center="2" type="button">中心 3</button>
-          <button class="tool-button" data-audio-test-center="3" type="button">中心 4</button>
-          <button class="tool-button" data-audio-test-center="4" type="button">中心 5</button>
-          <button class="tool-button primary" data-audio-test-center="all" type="button">全部中心</button>
+      <div class="white-balance-modal-panel" id="whiteBalanceModalPanel" hidden>
+        <div class="white-balance-grid" aria-label="白平衡通道校正">
+          <label class="white-balance-row"><span>红 R</span><input id="whiteBalanceRed" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceRedValue">255</output></label>
+          <label class="white-balance-row"><span>绿 G</span><input id="whiteBalanceGreen" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceGreenValue">255</output></label>
+          <label class="white-balance-row"><span>蓝 B</span><input id="whiteBalanceBlue" data-white-balance type="range" min="0" max="255" value="255" /><output id="whiteBalanceBlueValue">255</output></label>
         </div>
+        <button class="tool-button white-balance-reset" id="resetWhiteBalance" type="button">恢复默认白平衡</button>
       </div>
       <div class="modal-actions">
         <button class="tool-button modal-cancel" id="modalCancelButton" type="button">取消</button>

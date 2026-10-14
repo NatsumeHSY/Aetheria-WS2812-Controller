@@ -14,18 +14,13 @@ let healthCheckInFlight = false;
 let maintenanceMode = false;
 let persistTimer = null;
 let persistInFlight = null;
-let whiteBalanceTimer = null;
 let activeModalResolve = null;
 let activeModalMode = "notice";
 let modalPreviousFocus = null;
 let mediaStatusTimer = null;
 let mediaStatusInFlight = false;
 let mediaRunning = false;
-let audioStatusTimer = null;
-let audioStatusInFlight = false;
-let audioRunning = false;
 const MEDIA_MODE = "媒体封面";
-const AUDIO_MODE = "音频响应";
 
 function renderPage() {
     document.querySelector("head").innerHTML = window.htmlHeadContent;
@@ -40,8 +35,6 @@ function closeModal(result = null) {
     activeModalResolve = null;
     modal.hidden = true;
     modal.removeAttribute("data-variant");
-    const audioTestPanel = document.getElementById("audioTestPanel");
-    if (audioTestPanel) audioTestPanel.hidden = true;
     const confirmButton = document.getElementById("modalConfirmButton");
     if (confirmButton) confirmButton.hidden = false;
     document.body.classList.remove("modal-open");
@@ -72,9 +65,9 @@ function openModal({
     const inputWrap = document.getElementById("modalInputWrap");
     const inputLabelElement = document.getElementById("modalInputLabel");
     const input = document.getElementById("modalInput");
+    const whiteBalancePanel = document.getElementById("whiteBalanceModalPanel");
     const cancelButton = document.getElementById("modalCancelButton");
     const confirmButton = document.getElementById("modalConfirmButton");
-    const audioTestPanel = document.getElementById("audioTestPanel");
 
     activeModalMode = mode;
     modalPreviousFocus = document.activeElement;
@@ -82,6 +75,7 @@ function openModal({
     titleElement.textContent = title;
     messageElement.textContent = message;
     inputWrap.hidden = mode !== "prompt";
+    if (whiteBalancePanel) whiteBalancePanel.hidden = mode !== "white-balance";
     inputLabelElement.textContent = inputLabel;
     input.value = inputValue;
     input.placeholder = inputPlaceholder;
@@ -89,7 +83,6 @@ function openModal({
     cancelButton.hidden = mode === "notice";
     confirmButton.textContent = confirmLabel;
     confirmButton.hidden = false;
-    if (audioTestPanel) audioTestPanel.hidden = true;
     modal.hidden = false;
     document.body.classList.add("modal-open");
 
@@ -97,39 +90,8 @@ function openModal({
         activeModalResolve = resolve;
         window.requestAnimationFrame(() => {
             if (mode === "prompt") input.focus();
+            else if (mode === "white-balance") document.getElementById("whiteBalanceRed")?.focus();
             else confirmButton.focus();
-        });
-    });
-}
-
-function openAudioTestModal() {
-    const modal = document.getElementById("appModal");
-    const titleElement = document.getElementById("modalTitle");
-    const messageElement = document.getElementById("modalMessage");
-    const inputWrap = document.getElementById("modalInputWrap");
-    const audioTestPanel = document.getElementById("audioTestPanel");
-    const cancelButton = document.getElementById("modalCancelButton");
-    const confirmButton = document.getElementById("modalConfirmButton");
-    if (!modal || !audioTestPanel) return Promise.resolve(null);
-    if (activeModalResolve) closeModal(null);
-
-    activeModalMode = "audio-test";
-    modalPreviousFocus = document.activeElement;
-    modal.dataset.variant = "neutral";
-    titleElement.textContent = "水波中心测试";
-    messageElement.textContent = "选择一个中心点发送测试信号，观察水波向四周扩散。";
-    inputWrap.hidden = true;
-    audioTestPanel.hidden = false;
-    cancelButton.textContent = "关闭";
-    cancelButton.hidden = false;
-    confirmButton.hidden = true;
-    modal.hidden = false;
-    document.body.classList.add("modal-open");
-
-    return new Promise(resolve => {
-        activeModalResolve = resolve;
-        window.requestAnimationFrame(() => {
-            audioTestPanel.querySelector("[data-audio-test-center]")?.focus();
         });
     });
 }
@@ -159,7 +121,7 @@ function showPrompt(title, message, inputValue = "", options = {}) {
 }
 
 function modalCancelResult() {
-    return activeModalMode === "notice" || activeModalMode === "audio-test"
+    return activeModalMode === "notice"
         ? true
         : activeModalMode === "confirm" ? false : null;
 }
@@ -186,15 +148,14 @@ function bindModalEvents() {
     cancelButton.addEventListener("click", () => closeModal(modalCancelResult()));
     confirmButton.addEventListener("click", () => {
         const input = document.getElementById("modalInput");
-        closeModal(activeModalMode === "prompt" ? input.value : true);
+        if (activeModalMode === "white-balance") {
+            closeModal(getWhiteBalanceValues());
+        } else {
+            closeModal(activeModalMode === "prompt" ? input.value : true);
+        }
     });
     backdrop?.addEventListener("click", () => {
-        if (activeModalMode === "notice" || activeModalMode === "audio-test") closeModal(true);
-    });
-    document.getElementById("audioTestPanel")?.addEventListener("click", event => {
-        const button = event.target.closest("[data-audio-test-center]");
-        if (!button || button.disabled) return;
-        void sendAudioTest(button.dataset.audioTestCenter, button);
+        if (activeModalMode === "notice") closeModal(true);
     });
     document.addEventListener("keydown", handleModalKeydown);
 }
@@ -289,23 +250,64 @@ function getPaletteColors() {
 
 const WHITE_BALANCE_CHANNELS = ["Red", "Green", "Blue"];
 
-function getWhiteBalanceValues() {
-    return WHITE_BALANCE_CHANNELS.map(channel => {
-        const input = document.getElementById(`whiteBalance${channel}`);
-        const value = Number(input?.value);
-        return Number.isFinite(value) ? Math.max(0, Math.min(255, Math.round(value))) : 255;
+function normalizeWhiteBalanceValues(values) {
+    if (!Array.isArray(values) || values.length !== WHITE_BALANCE_CHANNELS.length) {
+        return [255, 255, 255];
+    }
+    return values.map(value => {
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? Math.max(0, Math.min(255, Math.round(numeric))) : 255;
     });
 }
 
+function getWhiteBalanceValues() {
+    return normalizeWhiteBalanceValues(WHITE_BALANCE_CHANNELS.map(channel => {
+        const input = document.getElementById(`whiteBalance${channel}`);
+        const value = Number(input?.value);
+        return value;
+    }));
+}
+
+function formatWhiteBalanceSummary(values) {
+    const [red, green, blue] = normalizeWhiteBalanceValues(values);
+    return `R ${red} · G ${green} · B ${blue}`;
+}
+
 function applyWhiteBalanceControls(values) {
-    if (!Array.isArray(values) || values.length !== 3) return;
+    const normalized = normalizeWhiteBalanceValues(values);
     WHITE_BALANCE_CHANNELS.forEach((channel, index) => {
-        const value = Math.max(0, Math.min(255, Math.round(Number(values[index]))));
+        const value = normalized[index];
         const input = document.getElementById(`whiteBalance${channel}`);
         const output = document.getElementById(`whiteBalance${channel}Value`);
         if (input) input.value = String(value);
         if (output) output.textContent = String(value);
     });
+    const summary = document.getElementById("whiteBalanceSummary");
+    if (summary) summary.textContent = formatWhiteBalanceSummary(normalized);
+}
+
+async function openWhiteBalanceModal() {
+    const initialValues = getWhiteBalanceValues();
+    const values = await openModal({
+        title: "白平衡",
+        message: "调整 RGB 输出比例，用于修正灯带实际发光差异。",
+        mode: "white-balance",
+        confirmLabel: "应用校正",
+        cancelLabel: "取消",
+    });
+    if (!Array.isArray(values)) {
+        applyWhiteBalanceControls(initialValues);
+        return { ok: false, cancelled: true };
+    }
+
+    const result = await bridgeCall("set_white_balance", ...values);
+    if (result.ok) {
+        applyWhiteBalanceControls(result.whiteBalance || values);
+        schedulePersist();
+    } else {
+        applyWhiteBalanceControls(initialValues);
+    }
+    return result;
 }
 
 function addPaletteColor() {
@@ -436,8 +438,6 @@ function applyUiState(state) {
         );
     });
     updateMediaVisibility();
-    updateAudioVisibility();
-    syncAudioStatusMonitor();
     if (Array.isArray(state.matrix144x6) && state.matrix144x6.length === ROWS) {
         matrixData = cloneMatrix(state.matrix144x6);
         renderMatrix();
@@ -482,11 +482,6 @@ function updateMediaVisibility() {
     if (panel) panel.hidden = currentMode !== MEDIA_MODE;
 }
 
-function updateAudioVisibility() {
-    const panel = document.getElementById("audioResponseStatus");
-    if (panel) panel.hidden = currentMode !== AUDIO_MODE;
-}
-
 function renderMediaStatus(media) {
     mediaRunning = media?.active === true && media?.suspended !== true;
     updateMediaVisibility();
@@ -514,116 +509,10 @@ async function refreshMediaStatus() {
     }
 }
 
-function averageBands(bands, start, end) {
-    if (!Array.isArray(bands) || end <= start) return 0;
-    const values = bands.slice(start, end).map(value => Number(value) || 0);
-    return values.length ? Math.max(0, Math.min(255, Math.round(values.reduce((sum, value) => sum + value, 0) / values.length))) : 0;
-}
-
-function renderAudioStatus(audio) {
-    audioRunning = audio?.active === true;
-    updateAudioVisibility();
-    const testButton = document.getElementById("audioTestButton");
-    if (testButton) testButton.disabled = !audioRunning || maintenanceMode;
-    const bands = audio?.signal?.bands || [];
-    const values = {
-        low: averageBands(bands, 0, 2),
-        mid: averageBands(bands, 2, 6),
-        high: averageBands(bands, 6, 8),
-    };
-    const meters = {
-        low: document.getElementById("audioBandLow"),
-        mid: document.getElementById("audioBandMid"),
-        high: document.getElementById("audioBandHigh"),
-    };
-    Object.entries(meters).forEach(([name, meter]) => {
-        if (meter) meter.style.width = `${values[name] / 255 * 100}%`;
-    });
-    const label = document.getElementById("audioStatusLabel");
-    const detail = document.getElementById("audioCaptureDetail");
-    const age = document.getElementById("audioFrameAge");
-    const capture = audio?.capture || {};
-    if (label) label.textContent = audio?.error ? "音频响应异常" : (audioRunning ? "音频响应运行中" : "音频响应待机");
-    if (detail) {
-        detail.textContent = audio?.error
-            || (!capture.available ? "系统音频回环不可用" : (capture.running ? "已连接系统播放设备" : "等待音频捕获"));
-    }
-    const sendAge = audio?.send_age;
-    if (age) age.textContent = sendAge == null ? "尚无音频帧" : `最近帧 ${Math.max(0, Math.floor(sendAge * 1000))} ms 前`;
-}
-
-async function sendAudioTest(center, sourceButton) {
-    const centers = center === "all" ? [0, 1, 2, 3, 4] : [Number(center)];
-    if (centers.some(value => !Number.isInteger(value) || value < 0 || value > 4)) return;
-
-    const buttons = Array.from(document.querySelectorAll("[data-audio-test-center]"));
-    buttons.forEach(button => { button.disabled = true; });
-    const originalLabel = sourceButton.textContent;
-    sourceButton.textContent = "发送中…";
-    try {
-        let result = { ok: true };
-        for (const target of centers) {
-            result = await bridgeCall("test_audio_center", target);
-            if (!result.ok) break;
-        }
-        const message = document.getElementById("modalMessage");
-        if (result.ok) {
-            message.textContent = center === "all"
-                ? "已按顺序发送全部五个中心的测试信号。"
-                : `已发送中心 ${Number(center) + 1} 的测试信号。`;
-            setStatus("水波测试信号已发送", true);
-        } else {
-            message.textContent = result.error || "水波测试发送失败。";
-            setStatus(result.error || "水波测试发送失败", false);
-        }
-    } finally {
-        sourceButton.textContent = originalLabel;
-        buttons.forEach(button => { button.disabled = false; });
-        const testButton = document.getElementById("audioTestButton");
-        if (testButton) testButton.disabled = !audioRunning || maintenanceMode;
-    }
-}
-
-async function refreshAudioStatus() {
-    if (currentMode !== AUDIO_MODE || audioStatusInFlight) return;
-    audioStatusInFlight = true;
-    try {
-        const result = await bridgeApiCall("audio_status");
-        if (result.ok) renderAudioStatus(result.audio);
-        else renderAudioStatus({ active: false, error: result.error || "无法读取音频状态" });
-    } finally {
-        audioStatusInFlight = false;
-    }
-}
-
-function stopAudioStatusMonitor() {
-    if (audioStatusTimer) {
-        window.clearInterval(audioStatusTimer);
-        audioStatusTimer = null;
-    }
-}
-
-function startAudioStatusMonitor() {
-    stopAudioStatusMonitor();
-    if (currentMode !== AUDIO_MODE) return;
-    void refreshAudioStatus();
-    audioStatusTimer = window.setInterval(refreshAudioStatus, 500);
-}
-
-function syncAudioStatusMonitor() {
-    if (currentMode === AUDIO_MODE) startAudioStatusMonitor();
-    else stopAudioStatusMonitor();
-}
-
 function applyEffectSettings(settings) {
     if (maintenanceMode) {
         setStatus("维护模式下请先恢复连接", false);
         return Promise.resolve({ ok: false, maintenance: true });
-    }
-    if (settings.mode === AUDIO_MODE && (!Array.isArray(settings.colors) || settings.colors.length > 8)) {
-        const error = "音频响应最多使用 8 种颜色";
-        setStatus(error, null);
-        return Promise.resolve({ ok: false, connected: true, error });
     }
     if (settings.mode !== MEDIA_MODE) return bridgeCall("apply", settings);
     // Starting the client worker is not a board ACK. Do not refresh the
@@ -922,7 +811,7 @@ function startHealthMonitor() {
         try {
             const result = await bridgeCall("health");
             if (result.ok) {
-                if (result.recovered || (currentMode === MEDIA_MODE && !mediaRunning) || (currentMode === AUDIO_MODE && !audioRunning)) {
+                if (result.recovered || (currentMode === MEDIA_MODE && !mediaRunning)) {
                     await syncBoardState(currentSettings());
                 }
                 return result;
@@ -1108,11 +997,13 @@ function bindEvents() {
     document.getElementById("resetStateButton")?.addEventListener("click", () => {
         void resetDeviceState();
     });
+    document.getElementById("whiteBalanceButton")?.addEventListener("click", () => {
+        void openWhiteBalanceModal();
+    });
 
     renderPaletteColors(getPaletteColors().length ? getPaletteColors() : ["#d88773"]);
     updateRhythmControl();
     bindModalEvents();
-    document.getElementById("audioTestButton")?.addEventListener("click", openAudioTestModal);
 
     document.addEventListener("mouseup", () => { isDrawing = false; });
 
@@ -1146,11 +1037,8 @@ function bindEvents() {
 
     function applyCurrentSettings() {
         updateMediaVisibility();
-        updateAudioVisibility();
-        syncAudioStatusMonitor();
         applyEffectSettings(currentSettings()).then(result => {
             if (result.ok && currentMode === MEDIA_MODE) renderMediaStatus(result.media);
-            if (result.ok && currentMode === AUDIO_MODE) renderAudioStatus(result.audio);
         });
         schedulePersist();
     }
@@ -1167,24 +1055,6 @@ function bindEvents() {
         schedulePersist();
     }
 
-    function updateWhiteBalanceParameter() {
-        const values = getWhiteBalanceValues();
-        void bridgeCall("set_white_balance", ...values).then(result => {
-            if (result.ok) {
-                applyWhiteBalanceControls(result.whiteBalance || values);
-                schedulePersist();
-            }
-        });
-    }
-
-    function scheduleWhiteBalanceUpdate() {
-        if (whiteBalanceTimer) window.clearTimeout(whiteBalanceTimer);
-        whiteBalanceTimer = window.setTimeout(() => {
-            whiteBalanceTimer = null;
-            updateWhiteBalanceParameter();
-        }, 100);
-    }
-
     bindColorList(applyCurrentSettings);
     bindShapeEvents();
 
@@ -1199,11 +1069,9 @@ function bindEvents() {
     whiteBalanceInputs.forEach(input => input.addEventListener("input", () => {
         const output = document.getElementById(`${input.id}Value`);
         if (output) output.textContent = input.value;
-        scheduleWhiteBalanceUpdate();
     }));
     document.getElementById("resetWhiteBalance")?.addEventListener("click", () => {
         applyWhiteBalanceControls([255, 255, 255]);
-        updateWhiteBalanceParameter();
     });
     paintColorPicker.addEventListener("input", schedulePersist);
     modeButtons.forEach(button => button.addEventListener("click", () => {
@@ -1217,7 +1085,6 @@ function bindEvents() {
 
     window.addEventListener("beforeunload", () => {
         if (mediaStatusTimer) window.clearInterval(mediaStatusTimer);
-        stopAudioStatusMonitor();
         flushPersistedState();
     });
 }

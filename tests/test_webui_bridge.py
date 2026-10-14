@@ -59,46 +59,6 @@ class SyncBridgeController(ShapeBridgeController):
         return self.snapshot
 
 
-class AudioBridgeController(ShapeBridgeController):
-    def __init__(self, calls):
-        super().__init__()
-        self.calls = calls
-
-    def start_audio(self, colors):
-        self.calls.append(("start_audio", colors))
-        return 20
-
-    def stop_audio(self):
-        self.calls.append(("stop_audio",))
-        return 21
-
-    def disconnect(self):
-        self.calls.append(("disconnect",))
-        self.connected = False
-
-
-class FakeAudioEffect:
-    def __init__(self, calls):
-        self.calls = calls
-        self._status = {"active": False, "error": ""}
-
-    def activate(self, colors):
-        self.calls.append(("start_audio", tuple(colors)))
-        self._status = {"active": True, "error": ""}
-        return dict(self._status)
-
-    def stop(self):
-        self.calls.append(("audio_effect_stop",))
-        self._status["active"] = False
-
-    def status(self):
-        return dict(self._status)
-
-    def test_center(self, center):
-        self.calls.append(("test_audio_center", center))
-        return dict(self._status)
-
-
 class WebUiBridgeTests(unittest.TestCase):
     def make_bridge(self, store):
         bridge = JavaScriptBridge.__new__(JavaScriptBridge)
@@ -244,75 +204,16 @@ class WebUiBridgeTests(unittest.TestCase):
             self.assertEqual(bridge.load_state()["state"], saved["state"])
             self.assertFalse(bridge.save_state({"version": 99})["ok"])
 
-    def test_audio_mode_starts_audio_effect_and_disconnect_stops_it_first(self):
+    def test_apply_rejects_audio_mode_while_audio_response_is_disabled(self):
         with tempfile.TemporaryDirectory() as directory:
-            calls = []
             bridge = self.make_bridge(MatrixShapeStore(Path(directory) / "shapes.json"))
-            bridge.controller = AudioBridgeController(calls)
-            bridge.audio_effect = FakeAudioEffect(calls)
 
-            result = bridge._apply_mode({
-                "mode": "音频响应",
-                "colors": ["#112233", "#445566"],
-                "brightness": 72,
-            })
-            self.assertIsNone(result)
-            self.assertEqual(calls, [("start_audio", ((17, 34, 51), (68, 85, 102)))])
-
-            bridge.disconnect()
-            self.assertEqual(calls[-2:], [("audio_effect_stop",), ("disconnect",)])
-
-    def test_audio_center_test_is_exposed_through_bridge(self):
-        with tempfile.TemporaryDirectory() as directory:
-            calls = []
-            bridge = self.make_bridge(MatrixShapeStore(Path(directory) / "shapes.json"))
-            bridge.controller = AudioBridgeController(calls)
-            bridge.audio_effect = FakeAudioEffect(calls)
-
-            result = bridge.test_audio_center(3)
-
-            self.assertEqual(result, {"ok": True, "connected": True, "audio": {"active": False, "error": ""}})
-            self.assertEqual(calls, [("test_audio_center", 3)])
-
-    def test_sync_audio_mode_reactivates_saved_board_audio_state(self):
-        snapshot = SyncSnapshot(5, 80, 180, 20, ((17, 34, 51),), None)
-        with tempfile.TemporaryDirectory() as directory:
-            calls = []
-            bridge = self.make_bridge(MatrixShapeStore(Path(directory) / "shapes.json"))
-            bridge.controller = SyncBridgeController(snapshot=snapshot)
-            bridge.audio_effect = FakeAudioEffect(calls)
-
-            result = bridge.sync()
-
-            self.assertTrue(result["ok"])
-            self.assertEqual(result["state"]["mode"], "音频响应")
-            self.assertEqual(calls, [("start_audio", ((17, 34, 51),))])
-
-    def test_sync_restores_saved_client_audio_mode_after_non_audio_board_snapshot(self):
-        snapshot = SyncSnapshot(1, 80, 180, 20, ((1, 2, 3),), None)
-        with tempfile.TemporaryDirectory() as directory:
-            calls = []
-            bridge = self.make_bridge(MatrixShapeStore(Path(directory) / "shapes.json"))
-            bridge.controller = SyncBridgeController(snapshot=snapshot)
-            bridge.audio_effect = FakeAudioEffect(calls)
-            bridge.ui_state_store.save({
-                "version": 1,
-                "source": "quick",
-                "mode": "音频响应",
-                "brightness": 61,
-                "speed": 90,
-                "colors": ["#112233", "#445566"],
-                "paintColor": "#8dc9bc",
-                "whiteBalance": [255, 190, 110],
-                "matrix144x6": lit_matrix(),
-            })
-
-            result = bridge.sync()
-
-            self.assertEqual(result["state"]["mode"], "音频响应")
-            self.assertEqual(result["state"]["colors"], ["#112233", "#445566"])
-            self.assertEqual(result["state"]["brightness"], 61)
-            self.assertEqual(calls, [("start_audio", ((17, 34, 51), (68, 85, 102)))])
+            with self.assertRaises(ValueError):
+                bridge._apply_mode({
+                    "mode": "音频响应",
+                    "colors": ["#112233"],
+                    "brightness": 72,
+                })
 
 
 if __name__ == "__main__":

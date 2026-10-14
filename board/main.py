@@ -11,8 +11,6 @@ try:
     from .protocol import (
         calculate_packet_crc,
         classify_sequence,
-        classify_audio_sequence,
-        decode_audio_frame_payload,
         next_sequence,
         restore_health_session,
         validate_packet,
@@ -22,8 +20,6 @@ except ImportError:
     from protocol import (
         calculate_packet_crc,
         classify_sequence,
-        classify_audio_sequence,
-        decode_audio_frame_payload,
         next_sequence,
         restore_health_session,
         validate_packet,
@@ -39,7 +35,6 @@ try:
         _normalize_rgb,
         copy_light_snapshot,
         get_global_brightness,
-        get_global_timing,
         get_global_white_balance,
         initialize_runtime_params,
         mark_unknown_snapshot,
@@ -60,7 +55,6 @@ try:
     )
     from .led_driver import LedDriver
     from .effects import Effector, interpolate_color_state, rainbow_color, xy2pos
-    from .audio_wave import AudioWaveConfig
 except ImportError:
     from state import (
         LIGHT_EFFECT_PARAMS,
@@ -70,7 +64,6 @@ except ImportError:
         _normalize_rgb,
         copy_light_snapshot,
         get_global_brightness,
-        get_global_timing,
         get_global_white_balance,
         initialize_runtime_params,
         mark_unknown_snapshot,
@@ -91,7 +84,6 @@ except ImportError:
     )
     from led_driver import LedDriver
     from effects import Effector, interpolate_color_state, rainbow_color, xy2pos
-    from audio_wave import AudioWaveConfig
 
 # initialize application globals
 DRIVER: LedDriver = None
@@ -100,17 +92,11 @@ SOCKET: socket.socket = None
 CLIENT_ADDR: tuple[str, int] = None
 SOCKET_BUFFER: list[tuple[bytes, int, list]] = []
 EXPECTED_SEQ: int = None
-AUDIO_FRAME_SEQ: int = None
-AUDIO_FRAME_COUNT = 0
-AUDIO_COLORS: tuple[tuple[int, int, int], ...] = ()
 MAINTENANCE_MODE = False
 
 # state and persistence helpers are imported from sibling modules.
 
 def redraw_static_snapshot() -> None:
-    audio_wave = getattr(getattr(globals().get("EFFECTOR"), "audio_wave", None), "active", False)
-    if audio_wave:
-        return
     snapshot = copy_light_snapshot()
     brightness = get_global_brightness()
 
@@ -244,15 +230,6 @@ def build_sync_response(expected_seq: int) -> bytes:
     brightness_max = snapshot["brightness_max"]
     timing = snapshot["timing"]
     matrix = snapshot["matrix"]
-
-    audio_effect = getattr(globals().get("EFFECTOR"), "audio_wave", None)
-    if getattr(audio_effect, "active", False):
-        mode = 5
-        colors = [list(color) for color in globals().get("AUDIO_COLORS", ())]
-        brightness_min = get_global_brightness()
-        brightness_max = brightness_min
-        timing = get_global_timing(timing)
-        matrix = None
 
     if len(colors) > 32:
         mode = 0xFF
@@ -610,50 +587,6 @@ def led_show(length: int, payload: list) -> None:
     if copy_light_snapshot()["mode"] == 4:
         save_persisted_state()
 
-def led_audio_control(length: int, payload: list) -> None:
-    if not payload:
-        return
-
-    global AUDIO_FRAME_SEQ, AUDIO_FRAME_COUNT, AUDIO_COLORS
-    subtype = payload[0]
-    if subtype == AUDIO_START_SUBTYPE:
-        if length < 2:
-            return
-        color_count = payload[1]
-        if not 1 <= color_count <= 8 or length != 2 + color_count * 3:
-            return
-        colors = [tuple(payload[index:index + 3]) for index in range(2, length, 3)]
-        AUDIO_FRAME_SEQ = None
-        AUDIO_FRAME_COUNT = 0
-        AUDIO_COLORS = tuple(colors)
-        config = AudioWaveConfig(colors, timing_ms=get_global_timing(25))
-        EFFECTOR.start_audio(config)
-        return
-
-    if subtype == AUDIO_STOP_SUBTYPE and length == 1:
-        AUDIO_FRAME_SEQ = None
-        AUDIO_FRAME_COUNT = 0
-        AUDIO_COLORS = ()
-        EFFECTOR.stop_audio(clear=True)
-
-def accept_audio_frame(payload: list) -> bool:
-    global AUDIO_FRAME_SEQ, AUDIO_FRAME_COUNT
-
-    try:
-        audio_seq, energy, beat, bands = decode_audio_frame_payload(payload)
-    except ValueError:
-        return False
-    status, _ = classify_audio_sequence(AUDIO_FRAME_SEQ, audio_seq)
-    if status != "accept":
-        return False
-    AUDIO_FRAME_SEQ = audio_seq
-    AUDIO_FRAME_COUNT += 1
-    if AUDIO_FRAME_COUNT == 1 or AUDIO_FRAME_COUNT % 30 == 0:
-        print(f"[INFO] Audio frame accepted: seq={audio_seq}, count={AUDIO_FRAME_COUNT}")
-    if EFFECTOR is not None:
-        EFFECTOR.update_audio((audio_seq, energy, beat, bands))
-    return True
-
 def exec_socket_buffer() -> None:
     effect_map = {
         b"\x00": led_clear,
@@ -666,7 +599,6 @@ def exec_socket_buffer() -> None:
         b"\x06": led_floor_tile_x,
         b"\x07": led_set_pixel,
         b"\x08": led_show,
-        AUDIO_COMMAND: led_audio_control,
         PARAM_BRIGHTNESS_COMMAND: led_set_global_brightness,
         PARAM_TIMING_COMMAND: led_set_global_timing,
         PARAM_WHITE_BALANCE_COMMAND: led_set_white_balance,
@@ -729,18 +661,16 @@ def loop() -> None:
 
             length = len(payload)
 
-            is_audio_frame = cmd == AUDIO_COMMAND and payload and payload[0] == AUDIO_FRAME_SUBTYPE
-            if not is_audio_frame:
-                print(
-                    f"[INFO] Received data from {addr[0]}:{addr[1]}:",
-                    data[:20],
-                    "..." if len(data) > 20 else "",
-                    "\n\tMagic:",
-                    data[:2],
-                    "Command:",
-                    cmd,
-                    f"Length: {length}, Seq: {seq}\n\tPayload: {payload[:20]}{'...' if len(payload) > 20 else ''}"
-                )
+            print(
+                f"[INFO] Received data from {addr[0]}:{addr[1]}:",
+                data[:20],
+                "..." if len(data) > 20 else "",
+                "\n\tMagic:",
+                data[:2],
+                "Command:",
+                cmd,
+                f"Length: {length}, Seq: {seq}\n\tPayload: {payload[:20]}{'...' if len(payload) > 20 else ''}"
+            )
 
             if cmd == HEALTH_COMMAND:
                 accepted, restored_addr, expected_seq = restore_health_session(
@@ -774,11 +704,6 @@ def loop() -> None:
 
             if cmd == RESET_STATE_COMMAND:
                 process_reset_state_command(addr, seq, payload)
-                continue
-
-            if cmd == AUDIO_COMMAND and payload and payload[0] == AUDIO_FRAME_SUBTYPE:
-                if addr == CLIENT_ADDR:
-                    accept_audio_frame(payload)
                 continue
 
             if addr != CLIENT_ADDR: continue

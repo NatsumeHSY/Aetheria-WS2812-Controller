@@ -132,6 +132,27 @@ class ClientUiTests(unittest.TestCase):
         self.assertIn("showConfirm(", index)
         self.assertIn("showNotice(", index)
 
+    def test_white_balance_is_adjusted_from_a_themed_modal(self) -> None:
+        runtime = (ROOT / "client" / "webui" / "scripts" / "runtime_const.js").read_text(encoding="utf-8")
+        preview = (ROOT / "client" / "webui" / "templates" / "index.html").read_text(encoding="utf-8")
+        index = (ROOT / "client" / "webui" / "scripts" / "index.js").read_text(encoding="utf-8")
+
+        for source in (runtime, preview):
+            self.assertIn('id="whiteBalanceButton"', source)
+            self.assertIn('id="whiteBalanceSummary"', source)
+            self.assertIn('id="whiteBalanceModalPanel"', source)
+            self.assertIn('id="whiteBalanceRed"', source)
+            self.assertIn('id="whiteBalanceGreen"', source)
+            self.assertIn('id="whiteBalanceBlue"', source)
+            self.assertIn('id="resetWhiteBalance"', source)
+
+        self.assertIn("function openWhiteBalanceModal", index)
+        self.assertIn('activeModalMode === "white-balance"', index)
+        self.assertIn('bridgeCall("set_white_balance"', index)
+        self.assertNotIn('id="whiteBalanceRed" data-white-balance', preview.split('id="appModal"', 1)[0])
+        self.assertIn('document.getElementById("whiteBalanceButton").addEventListener("click"', preview)
+        self.assertIn('document.getElementById("resetWhiteBalance").addEventListener("click"', preview)
+
     def test_runtime_persists_output_source_paint_color_and_preserves_rainbow_palette(self) -> None:
         source = (ROOT / "client" / "webui" / "scripts" / "index.js").read_text(encoding="utf-8")
         settings = re.search(r"function currentSettings\(\).*?\n\}", source, re.S)
@@ -142,26 +163,15 @@ class ClientUiTests(unittest.TestCase):
         self.assertIn("fallback.colors", source)
         self.assertIn("fallback.paintColor", source)
 
-    def test_audio_response_mode_and_status_polling_are_dynamic_and_themed(self) -> None:
+    def test_audio_response_is_removed_from_the_client_ui(self) -> None:
         runtime = (ROOT / "client" / "webui" / "scripts" / "runtime_const.js").read_text(encoding="utf-8")
         preview = (ROOT / "client" / "webui" / "templates" / "index.html").read_text(encoding="utf-8")
         index = (ROOT / "client" / "webui" / "scripts" / "index.js").read_text(encoding="utf-8")
 
-        for source in (runtime, preview):
-            self.assertIn("音频响应", source)
-            self.assertIn('id="audioResponseStatus"', source)
-            self.assertIn('id="audioBandLow"', source)
-            self.assertIn('id="audioBandMid"', source)
-            self.assertIn('id="audioBandHigh"', source)
-
-        for symbol in ("renderAudioStatus", "startAudioStatusMonitor", "stopAudioStatusMonitor"):
-            self.assertIn(f"function {symbol}", index)
-        self.assertIn('bridgeApiCall("audio_status")', index)
-        self.assertIn('bridgeCall("test_audio_center"', index)
-        self.assertIn('id="audioTestButton"', runtime)
-        self.assertIn('id="audioTestButton"', preview)
-        self.assertIn("startAudioStatusMonitor", index)
-        self.assertIn("stopAudioStatusMonitor", index)
+        for source in (runtime, preview, index):
+            self.assertNotIn("音频响应", source)
+            self.assertNotIn("audioResponseStatus", source)
+            self.assertNotIn("audio_status", source)
 
 
 if __name__ == "__main__":

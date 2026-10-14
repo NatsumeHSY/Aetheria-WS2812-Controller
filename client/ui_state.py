@@ -11,7 +11,7 @@ MATRIX_ROWS = 6
 MATRIX_COLUMNS = 144
 MAX_COLORS = 64
 VALID_SOURCES = frozenset(("quick", "matrix"))
-VALID_MODES = frozenset(("静态常亮", "呼吸渐变", "流光溢彩", "媒体封面", "音频响应", "自定义矩阵"))
+VALID_MODES = frozenset(("静态常亮", "呼吸渐变", "流光溢彩", "媒体封面", "自定义矩阵"))
 
 
 def _require_int(value, field: str, minimum: int, maximum: int) -> int:
@@ -74,9 +74,6 @@ def normalize_ui_state(state: dict) -> dict:
     colors = state.get("colors")
     if not isinstance(colors, list) or not 1 <= len(colors) <= MAX_COLORS:
         raise ValueError("UI color list must contain between 1 and 64 colors")
-    if mode == "音频响应" and len(colors) > 8:
-        raise ValueError("audio response supports at most eight colors")
-
     return {
         "version": UI_STATE_VERSION,
         "source": source,
